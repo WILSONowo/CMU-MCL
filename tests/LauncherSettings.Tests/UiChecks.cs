@@ -102,7 +102,14 @@ internal static partial class Program
         Check(store.Load().BackgroundUrl=="" && Get<TextBlock>(window,"BackgroundUrlError").Text.Length>0,"unsupported URL scheme rejected without saving");
         if(live)
         {
-            Get<TextBox>(window,"BackgroundUrlTextBox").Text="https://images.example.com/background.png";
+            string? backgroundUrl = Environment.GetEnvironmentVariable("CMUMCL_TEST_BACKGROUND_URL");
+            if (!Uri.TryCreate(backgroundUrl, UriKind.Absolute, out var backgroundUri)
+                || (backgroundUri.Scheme != Uri.UriSchemeHttp && backgroundUri.Scheme != Uri.UriSchemeHttps)
+                || !string.IsNullOrEmpty(backgroundUri.UserInfo)
+                || !string.IsNullOrEmpty(backgroundUri.Query)
+                || !string.IsNullOrEmpty(backgroundUri.Fragment))
+                throw new InvalidOperationException("--live-background requires CMUMCL_TEST_BACKGROUND_URL with an HTTP(S) test image URL without credentials, query or fragment.");
+            Get<TextBox>(window,"BackgroundUrlTextBox").Text=backgroundUri.AbsoluteUri;
             Get<ComboBox>(window,"BackgroundModeCombo").SelectedIndex=(int)BackgroundKind.Network;
             await Until(()=>!AppearanceManager.BackgroundLoading,35000);
             Check(AppearanceManager.BackgroundError==null && AppearanceManager.CurrentBackgroundPath?.EndsWith(".image")==true,"user supplied image API downloads decodes and displays in real UI");

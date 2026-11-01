@@ -38,3 +38,8 @@
 **/.Rhistory
 **/.RData
 **/.Ruserdata
+
+# Public entry point and private working material
+!/README.md
+/local-only/
+/docs/local-only/

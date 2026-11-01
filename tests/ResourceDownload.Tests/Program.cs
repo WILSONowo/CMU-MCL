@@ -19,6 +19,32 @@ using (var client = new ResourceManifestClient(handler, new Uri("https://cdn.exa
     Check((await client.GetManifestAsync()).FormatVersion == 1, "valid signed pair accepted");
     Check(handler.Calls == 2, "valid pair needs exactly two requests");
 }
+foreach (var (url, expected, description) in new[]
+{
+    ($"https://{ResourceManifestClient.AllowedPackHost}/packs/example.mrpack", true, "public product host"),
+    ($"https://{ResourceManifestClient.AllowedPackHost.ToUpperInvariant()}/packs/example.mrpack", true, "case-insensitive product host"),
+    ($"http://{ResourceManifestClient.AllowedPackHost}/packs/example.mrpack", false, "unencrypted transport"),
+    ($"https://{ResourceManifestClient.AllowedPackHost}.example.invalid/packs/example.mrpack", false, "host suffix spoofing"),
+    ("https://198.51.100.10/packs/example.mrpack", false, "unlisted IP endpoint"),
+    ("https://downloads.example.invalid/packs/example.mrpack", false, "unlisted domain")
+})
+{
+    byte[] packManifest = JsonSerializer.SerializeToUtf8Bytes(new
+    {
+        formatVersion = 1,
+        instances = new[] { new { id = "allowlist-fixture", pack = new { url } } }
+    });
+    byte[] packSignature = JsonSerializer.SerializeToUtf8Bytes(new
+    {
+        algorithm = "ECDSA-P256-SHA256",
+        signature = Convert.ToBase64String(key.SignData(packManifest, HashAlgorithmName.SHA256))
+    });
+    using var handler = new Handler((request, _) => Reply(request.RequestUri!.AbsolutePath.EndsWith(".sig") ? packSignature : packManifest));
+    using var client = new ResourceManifestClient(handler, new Uri("https://cdn.example.com/"), key.ExportSubjectPublicKeyInfoPem());
+    bool accepted = true;
+    try { await client.GetManifestAsync(); } catch (ResourceException) { accepted = false; }
+    Check(accepted == expected, "signed resource URL policy: " + description);
+}
 using (var handler = new Handler((request, _) =>
 {
     if (request.RequestUri!.AbsolutePath.EndsWith(".sig")) return Reply(signature);
