@@ -16,7 +16,6 @@ namespace CMUmcl.Content
     {
         public const string BaseUrl = "https://csumcl.mcapcs.cn";
         public const string AllowedPackHost = "csumcl.mcapcs.cn";
-        private const string LegacyAllowedPackHost = "csumcl.mcapcs.cn";
         private const string UserAgent = "CMUmcl/0.1.0";
         private const string SignatureAlgorithm = "ECDSA-P256-SHA256";
 
@@ -140,8 +139,7 @@ namespace CMUmcl.Content
                 return false;
             if (!string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
                 return false;
-            return string.Equals(uri.Host, AllowedPackHost, StringComparison.OrdinalIgnoreCase)
-                || string.Equals(uri.Host, LegacyAllowedPackHost, StringComparison.OrdinalIgnoreCase);
+            return string.Equals(uri.Host, AllowedPackHost, StringComparison.OrdinalIgnoreCase);
         }
 
         public void Dispose() => _http.Dispose();
