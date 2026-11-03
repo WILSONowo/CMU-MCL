@@ -96,7 +96,7 @@ jobs:
         shell: pwsh
         run: |
           $out = Join-Path $env:RUNNER_TEMP 'public-package'
-          $zip = & ./scripts/package-net48-release.ps1 -Version $env:VERSION `
+          $zip = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./scripts/package-net48-release.ps1 -Version $env:VERSION `
             -MainOutput 'CMUmcl/bin/Release/net48' `
             -UpdaterOutput 'CMUmcl.Updater/bin/Release/net48' `
             -OutputDirectory $out
@@ -165,7 +165,7 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw 'Keyed client build failed' }
             dotnet build CMUmcl.Updater/CMUmcl.Updater.csproj -c Release -p:Version=$env:VERSION --nologo
             if ($LASTEXITCODE -ne 0) { throw 'Keyed updater build failed' }
-            $zip = & ./scripts/package-net48-release.ps1 -Version $env:VERSION `
+            $zip = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./scripts/package-net48-release.ps1 -Version $env:VERSION `
               -MainOutput (Join-Path $privateRoot 'bin\CMUmcl\Release\net48') `
               -UpdaterOutput (Join-Path $privateRoot 'bin\CMUmcl.Updater\Release\net48') `
               -OutputDirectory $keyedOut -RequireCurseForgeKey
@@ -190,7 +190,7 @@ jobs:
             [IO.File]::WriteAllText($keyPath, $env:UPDATE_SIGNING_KEY_PEM, [Text.UTF8Encoding]::new($false))
             $fileName = [IO.Path]::GetFileName($env:KEYED_ZIP)
             $url = "https://csumcl.mcapcs.cn/update/windows-x86_64/net48/$fileName"
-            & ./scripts/sign-update-feed.ps1 -PackagePath $env:KEYED_ZIP -Version $env:VERSION `
+            & powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./scripts/sign-update-feed.ps1 -PackagePath $env:KEYED_ZIP -Version $env:VERSION `
               -Url $url -PrivateKeyPath $keyPath -OutputPath $feedPath -Notes "CMUmcl $env:VERSION"
             if ($LASTEXITCODE -ne 0) { throw 'Feed signing failed' }
             "KEYED_FEED=$feedPath" >> $env:GITHUB_ENV
