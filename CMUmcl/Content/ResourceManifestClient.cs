@@ -152,8 +152,7 @@ namespace CMUmcl.Content
             try
             {
                 byte[] signature = Convert.FromBase64String(signatureBase64);
-                using var ecdsa = ECDsa.Create();
-                ecdsa.ImportFromPem(_publicKeyPem);
+                using var ecdsa = Compat.CreateEcdsa(_publicKeyPem);
                 return ecdsa.VerifyData(data, signature, HashAlgorithmName.SHA256);
             }
             catch (Exception)

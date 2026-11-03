@@ -517,7 +517,7 @@ namespace CMUmcl.Content
             {
                 ct.ThrowIfCancellationRequested();
 
-                string relative = Path.GetRelativePath(sourceDir, sourceFile);
+                string relative = Compat.GetRelativePath(sourceDir, sourceFile);
                 string targetFile = Path.Combine(targetDir, relative);
                 Directory.CreateDirectory(Path.GetDirectoryName(targetFile)!);
 

@@ -57,7 +57,7 @@ namespace CMUmcl.Content
                     hash.AppendData(buffer, 0, read);
             }
 
-            return Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
+            return Compat.Hex(hash.GetHashAndReset()).ToLowerInvariant();
         }
     }
 }

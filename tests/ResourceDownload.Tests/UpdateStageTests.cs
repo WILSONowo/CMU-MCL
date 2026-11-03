@@ -16,9 +16,9 @@ internal static class UpdateStageTests
         var previousRoot = LauncherPaths.RootOverride;
         LauncherPaths.RootOverride = root;
         string? readyStage = null;
-        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        using var key = new ECDsaCng(256);
         UpdateSignature Sign(byte[] value) => new("ECDSA-P256-SHA256", "ieee-p1363-base64",
-            Convert.ToBase64String(key.SignData(value, HashAlgorithmName.SHA256, DSASignatureFormat.IeeeP1363FixedFieldConcatenation)));
+            Convert.ToBase64String(key.SignData(value, HashAlgorithmName.SHA256)));
         byte[] Envelope(UpdateRelease value)
         {
             var payload = JsonSerializer.SerializeToUtf8Bytes(value, UpdateProtocol.JsonOptions);
@@ -31,21 +31,20 @@ internal static class UpdateStageTests
             {
                 // Synthetic payload is never run: a valid PE version is needed
                 // to exercise StageAsync's final package-version guard.
-                zip.CreateEntryFromFile(Assembly.GetExecutingAssembly().Location, "CMUmcl.dll");
-                zip.CreateEntry("CMUmcl.exe").Open().Dispose();
+                zip.CreateEntryFromFile(Assembly.GetExecutingAssembly().Location, "CMUmcl.exe");
                 zip.CreateEntry("updater/CMUmcl.Updater.exe").Open().Dispose();
                 using var padding = zip.CreateEntry("Assets/test.bin").Open();
-                padding.Write(RandomNumberGenerator.GetBytes(250000));
+                var randomPadding=Compat.RandomBytes(250000);padding.Write(randomPadding,0,randomPadding.Length);
             }
             var bytes = File.ReadAllBytes(archive);
-            var hash = Convert.ToHexString(SHA256.HashData(bytes));
-            var release = new UpdateRelease(2, "windows-x86_64", "9.0.0", "https://csumcl.mcapcs.cn/update/windows-x86_64/9.0.0.zip",
+            var hash = Compat.Hex(Compat.Sha256(bytes));
+            var release = new UpdateRelease(2, "windows-x86_64", "9.0.0", "https://csumcl.mcapcs.cn/update/windows-x86_64/net48/9.0.0.zip",
                 bytes.Length, hash, Sign(bytes), "isolated test");
             var envelope = Envelope(release);
             var progress = new Progress<double>(_ => { });
             using var cancellation = new CancellationTokenSource();
             using (var client = new LauncherUpdateClient(new HttpClient(new Transport(_ =>
-                Response(new Interrupted(bytes, cancellation), bytes.Length))), key.ExportSubjectPublicKeyInfoPem()))
+                Response(new Interrupted(bytes, cancellation), bytes.Length))), Compat.ExportPem((ECDsaCng)key)))
             {
                 var cancelled = false;
                 try { await client.StageAsync(release, envelope, progress, cancellation.Token); }
@@ -59,14 +58,14 @@ internal static class UpdateStageTests
             {
                 resumedAt = request.Headers.Range?.Ranges.Single().From;
                 var offset = checked((int)(resumedAt ?? 0));
-                var response = Response(new MemoryStream(bytes[offset..]), bytes.Length - offset);
+                var response = Response(new MemoryStream(bytes.Skip(offset).ToArray()), bytes.Length - offset);
                 if (offset > 0)
                 {
                     response.StatusCode = HttpStatusCode.PartialContent;
                     response.Content.Headers.ContentRange = new ContentRangeHeaderValue(offset, bytes.Length - 1, bytes.Length);
                 }
                 return response;
-            })), key.ExportSubjectPublicKeyInfoPem()))
+            })), Compat.ExportPem((ECDsaCng)key)))
             {
                 readyStage = await client.StageAsync(release, envelope, progress, default);
                 check(resumedAt == 60000, "new update client resumes previous StageAsync download");
@@ -74,7 +73,7 @@ internal static class UpdateStageTests
                 check(File.ReadAllBytes(Path.Combine(readyStage, "latest.json")).SequenceEqual(envelope), "staged updater receives original signed envelope");
                 check(!Directory.Exists(Path.Combine(readyStage, "preview")), "successful extraction preflight cleans its preview directory");
             }
-            using (var client = new LauncherUpdateClient(new HttpClient(new Transport(_ => Response(new MemoryStream(bytes), bytes.Length))), key.ExportSubjectPublicKeyInfoPem()))
+            using (var client = new LauncherUpdateClient(new HttpClient(new Transport(_ => Response(new MemoryStream(bytes), bytes.Length))), Compat.ExportPem((ECDsaCng)key)))
             {
                 var invalidSignature = release with { ArchiveSignature = Sign([1, 2, 3]) };
                 var rejected = false;
@@ -112,10 +111,10 @@ internal static class UpdateStageTests
     }
     private sealed class Interrupted(byte[] bytes, CancellationTokenSource cancellation) : MemoryStream(bytes)
     {
-        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken ct = default)
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken ct)
         {
             if (Position >= 60000) { cancellation.Cancel(); ct.ThrowIfCancellationRequested(); }
-            return base.ReadAsync(buffer[..Math.Min(buffer.Length, 60000 - (int)Position)], ct);
+            return base.ReadAsync(buffer,offset,Math.Min(count, 60000 - (int)Position),ct);
         }
     }
 }

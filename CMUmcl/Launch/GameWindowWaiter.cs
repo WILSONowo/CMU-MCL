@@ -24,8 +24,8 @@ namespace CMUmcl.Launch
         /// timeout elapses while the process is still running; throws
         /// <see cref="LaunchException"/> if the process exits before a window appears.
         /// </summary>
-        public static Task<bool> WaitForWindowAsync(Process process, CancellationToken ct = default)
-            => WaitForWindowAsync(process, DefaultTimeout, DefaultPollIntervalMilliseconds, ct);
+        public static Task<bool> WaitForWindowAsync(Process process, CancellationToken ct = default, Func<string>? failureDetails = null)
+            => WaitForWindowAsync(process, DefaultTimeout, DefaultPollIntervalMilliseconds, ct, failureDetails);
 
         /// <summary>
         /// Test-friendly overload that allows overriding the timeout and poll interval.
@@ -34,7 +34,8 @@ namespace CMUmcl.Launch
             Process process,
             TimeSpan timeout,
             int pollIntervalMilliseconds,
-            CancellationToken ct = default)
+            CancellationToken ct = default,
+            Func<string>? failureDetails = null)
         {
             if (process == null) throw new ArgumentNullException(nameof(process));
             if (pollIntervalMilliseconds <= 0) throw new ArgumentOutOfRangeException(nameof(pollIntervalMilliseconds));
@@ -57,7 +58,7 @@ namespace CMUmcl.Launch
                 }
 
                 if (exited)
-                    throw new LaunchException($"游戏进程已退出（退出码 {SafeExitCode(process)}）。请查看日志了解启动失败原因。");
+                    throw new LaunchException($"游戏进程已退出（退出码 {SafeExitCode(process)}）。{failureDetails?.Invoke() ?? "未取得安全分类。"} 请查看日志了解启动失败原因。");
 
                 IntPtr windowHandle;
                 try

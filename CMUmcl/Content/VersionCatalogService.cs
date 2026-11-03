@@ -216,6 +216,7 @@ namespace CMUmcl.Content
                 IReadOnlyList<LoaderVersionInfo> detailed = await GetLoaderVersionsAsync("fabric", gameVersion, ct).ConfigureAwait(false);
                 return detailed.Select(l => l.Version).ToList();
             }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
             catch
             {
                 return Array.Empty<string>();
@@ -233,6 +234,7 @@ namespace CMUmcl.Content
                 IReadOnlyList<LoaderVersionInfo> detailed = await GetLoaderVersionsAsync("quilt", gameVersion, ct).ConfigureAwait(false);
                 return detailed.Select(l => l.Version).ToList();
             }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
             catch
             {
                 return Array.Empty<string>();
@@ -296,11 +298,12 @@ namespace CMUmcl.Content
 
         /// <summary>
         /// Races <paramref name="factory"/> against a timeout. Returns the default value when
-        /// the timeout (or <paramref name="ct"/>) wins, observing any later fault on the
+        /// the timeout wins; caller cancellation is propagated, observing any later fault on the
         /// abandoned task so it can never surface as an unobserved exception.
         /// </summary>
         private static async Task<T?> WithTimeoutAsync<T>(Func<Task<T>> factory, CancellationToken ct)
         {
+            ct.ThrowIfCancellationRequested();
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(VersionListTimeout);
 
@@ -314,10 +317,13 @@ namespace CMUmcl.Content
                     CancellationToken.None,
                     TaskContinuationOptions.OnlyOnFaulted,
                     TaskScheduler.Default);
+                ct.ThrowIfCancellationRequested();
                 return default;
             }
 
-            return await task.ConfigureAwait(false);
+            var result=await task.ConfigureAwait(false);
+            ct.ThrowIfCancellationRequested();
+            return result;
         }
 
         // ------------------------------------------------------------------
@@ -360,12 +366,11 @@ namespace CMUmcl.Content
                 if (loaders == null)
                     return Array.Empty<LoaderVersionInfo>();
 
-                return loaders
-                    .Where(l => !string.IsNullOrWhiteSpace(l.Version))
-                    .OrderByDescending(l => l.Stable)
-                    .ThenByDescending(l => l.Build ?? 0)
-                    .ThenByDescending(l => l.Version, StringComparer.OrdinalIgnoreCase)
-                    .Select(l => new LoaderVersionInfo(l.Version!, gameVersion, l.Stable, FabricLikeDetail(l.Stable, l.Build)))
+                // Quilt metadata has no stable flag, and build is the prerelease suffix,
+                // not a monotonically increasing release build (beta.79 can be ancient).
+                return OrderQuiltVersions(loaders.Where(l => !string.IsNullOrWhiteSpace(l.Version)), l => l.Version!)
+                    .Select(l => new LoaderVersionInfo(l.Version!, gameVersion, l.Version!.IndexOf('-') < 0,
+                        FabricLikeDetail(l.Version.IndexOf('-') < 0, l.Build)))
                     .ToList();
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -377,6 +382,10 @@ namespace CMUmcl.Content
                 return Array.Empty<LoaderVersionInfo>();
             }
         }
+
+        internal static IEnumerable<T> OrderQuiltVersions<T>(IEnumerable<T> versions, Func<T, string> version)
+            => versions.OrderBy(v => version(v).IndexOf('-') >= 0)
+                .ThenBy(version, Comparer<string>.Create(CompareVersionStringsDescending));
 
         private async Task<IReadOnlyList<LoaderVersionInfo>> GetForgeLoaderVersionsDetailedAsync(string gameVersion, CancellationToken ct)
         {

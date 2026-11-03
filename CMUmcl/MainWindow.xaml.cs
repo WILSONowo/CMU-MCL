@@ -35,6 +35,7 @@ namespace CMUmcl
         private bool _handlingDrop;
         private readonly LauncherUpdateClient _launcherUpdates;
         private readonly CancellationTokenSource _updateLifetime = new();
+        private readonly Community.CommunityResourceViewModel _community;
         private CancellationTokenSource? _updateDownload;
         private (UpdateRelease Release, byte[] Envelope)? _availableUpdate;
         private bool _checkingLauncherUpdate;
@@ -42,7 +43,7 @@ namespace CMUmcl
         private bool _windowClosed;
         private int _activeOperations;
 
-        private enum MainPage { Packs, Instances, Settings }
+        private enum MainPage { Packs, Community, Instances, Settings, InstanceSettings, InstanceContent }
         private enum PacksContentState { Loading, Cards, Empty, Error }
 
         private MainPage _currentPage = MainPage.Packs;
@@ -70,10 +71,11 @@ namespace CMUmcl
             AuthSession session, AuthStore store, ResourceManifestClient manifestClient,
             PackInstaller installer, InstalledStateStore installedState, LaunchService launchService,
             SettingsStore settingsStore, LocalInstanceService localInstanceService,
-            LauncherUpdateClient launcherUpdates)
+            LauncherUpdateClient launcherUpdates, Community.CommunityResourceViewModel? communityOverride = null)
         {
             _launcherUpdates = launcherUpdates;
             InitializeComponent();
+            StateChanged+=(_,_)=>{var chrome=System.Windows.Shell.WindowChrome.GetWindowChrome(this);if(chrome!=null)chrome.ResizeBorderThickness=new Thickness(WindowState==WindowState.Maximized?0:6);};
 
             _session = session;
             _store = store;
@@ -84,12 +86,17 @@ namespace CMUmcl
             _settingsStore = settingsStore;
             _localInstanceService = localInstanceService;
 
+            _community = communityOverride ?? Community.CommunityResourceViewModel.CreateDefault(_installedState);
+            CommunityResourceView.DataContext = _community;
+
             AccountNameText.Text = session.SelectedProfileName;
             CardsList.ItemsSource = _cards;
             InstancesList.ItemsSource = _instances;
 
             CreateInstanceView.BackRequested += CreateInstanceView_BackRequested;
             CreateInstanceView.InstanceCreated += CreateInstanceView_InstanceCreated;
+            CreateInstanceView.OperationStateChanged += UpdateCreateActivity;
+            CreateInstanceView.IsVisibleChanged += (_, _) => UpdateCreateActivity();
 
             _settings = _settingsStore.Load();
             Appearance.AppearanceManager.Initialize(_settings);
@@ -103,6 +110,12 @@ namespace CMUmcl
             Closed += (_, _) =>
             {
                 _windowClosed = true;
+                CancelInlinePrompt();CloseEmbeddedUiForNavigation();
+                foreach(var request in _launchRequests.Values.ToArray())request.Cancel();
+                foreach(var editor in _settingsWindows.Values.ToArray())editor.Close();
+                _avatarLifetime.Cancel();
+                _avatarService?.Dispose();
+                CreateInstanceView.Close();
                 Appearance.AppearanceManager.BackgroundChanged -= UpdateBackgroundStatus;
                 _updateLifetime.Cancel();
                 _launcherUpdates.Dispose();
@@ -112,6 +125,7 @@ namespace CMUmcl
 
         private async void Window_Loaded(object sender, RoutedEventArgs e)
         {
+            _ = LoadAccountAvatarAsync();
             _ = CheckLauncherUpdateAsync();
             await LoadManifestAsync();
         }
@@ -175,7 +189,7 @@ namespace CMUmcl
                 _updateDownload.Token.ThrowIfCancellationRequested();
                 if (_windowClosed) return;
                 LauncherUpdateStatus.Text = "下载与校验完成，准备安装。";
-                if (MessageBox.Show(this, $"已下载并验证 {available.Release.Version}。现在关闭客户端、安装更新并重新打开？",
+                if (LauncherPrompt.Show(this, $"已下载并验证 {available.Release.Version}。现在关闭客户端、安装更新并重新打开？",
                     "客户端更新", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
                 {
                     LauncherUpdateClient.StartUpdater(stage);
@@ -231,6 +245,7 @@ namespace CMUmcl
                 _handlingDrop = true;
                 try
                 {
+                    if (CreateInstanceView.HasPendingTask) { CreateInstanceView.Resume(); return; }
                     CreateInstanceView.Open(_localInstanceService, _launchService);
                     CreateInstanceView.SelectMrpackFile(files[0]);
                     e.Effects = DragDropEffects.Copy;
@@ -244,7 +259,7 @@ namespace CMUmcl
 
             // Reject multiple files / non-mrpack drops without opening the flow.
             e.Effects = DragDropEffects.None;
-            MessageBox.Show(this, "仅支持拖入单个 .mrpack 整合包文件。", "无法导入", MessageBoxButton.OK, MessageBoxImage.Information);
+            LauncherPrompt.Show(this, "仅支持拖入单个 .mrpack 整合包文件。", "无法导入", MessageBoxButton.OK, MessageBoxImage.Information);
         }
 
         private static DragDropEffects GetMrpackDropEffects(IDataObject data)
@@ -270,6 +285,13 @@ namespace CMUmcl
                 ShowPacksView();
         }
 
+        private void CommunityNavButton_Click(object sender, RoutedEventArgs e)
+        {
+            CloseCreateInstanceView();
+            if (_currentPage != MainPage.Community)
+                ShowCommunityView();
+        }
+
         private void InstancesNavButton_Click(object sender, RoutedEventArgs e)
         {
             CloseCreateInstanceView();
@@ -284,12 +306,26 @@ namespace CMUmcl
                 ShowSettingsView();
         }
 
-        /// <summary>Closes the in-main create flow if it is currently open (cancelling in-flight work).</summary>
+        /// <summary>Only hides the create flow during navigation; the task remains owned by this window.</summary>
         private void CloseCreateInstanceView()
         {
             if (CreateInstanceView.Visibility == Visibility.Visible)
-                CreateInstanceView.Close();
+                CreateInstanceView.HideForNavigation();
         }
+
+        private void UpdateCreateActivity()
+        {
+            if (_windowClosed) return;
+            CreateActivityBanner.Visibility = CreateInstanceView.HasPendingTask && !CreateInstanceView.IsVisible ? Visibility.Visible : Visibility.Collapsed;
+            CreateActivityText.Text = CreateInstanceView.TaskStatus;
+            if (!CreateInstanceView.HasActiveOperation)
+            {
+                if (_currentPage == MainPage.Instances) RefreshInstances();
+                _community.RefreshTargets();
+            }
+        }
+
+        private void ResumeCreateActivity_Click(object sender, RoutedEventArgs e) {CloseEmbeddedUiForNavigation();CreateInstanceView.Resume();}
 
         private void CreateInstanceView_BackRequested()
         {
@@ -299,8 +335,10 @@ namespace CMUmcl
 
         private void CreateInstanceView_InstanceCreated()
         {
+            bool visible = CreateInstanceView.IsVisible;
             CreateInstanceView.Close();
-            ShowInstancesView();
+            if (visible) ShowInstancesView();
+            else if (_currentPage == MainPage.Instances) RefreshInstances();
         }
 
         private void ViewInstancesButton_Click(object sender, RoutedEventArgs e)
@@ -311,12 +349,14 @@ namespace CMUmcl
         private void UpdateNavStyles()
         {
             PacksNavButton.Style = (Style)FindResource(_currentPage == MainPage.Packs ? "NavItemActive" : "NavItem");
-            InstancesNavButton.Style = (Style)FindResource(_currentPage == MainPage.Instances ? "NavItemActive" : "NavItem");
+            InstancesNavButton.Style = (Style)FindResource(_currentPage is MainPage.Instances or MainPage.InstanceSettings or MainPage.InstanceContent ? "NavItemActive" : "NavItem");
             SettingsNavButton.Style = (Style)FindResource(_currentPage == MainPage.Settings ? "NavItemActive" : "NavItem");
+            CommunityNavButton.Style = (Style)FindResource(_currentPage == MainPage.Community ? "NavItemActive" : "NavItem");
         }
 
         private void ShowPacksView()
         {
+            CloseEmbeddedUiForNavigation();
             _currentPage = MainPage.Packs;
             UpdateNavStyles();
 
@@ -328,12 +368,14 @@ namespace CMUmcl
             SettingsScroll.Visibility = Visibility.Collapsed;
             InstancesScroll.Visibility = Visibility.Collapsed;
             InstancesEmptyStateText.Visibility = Visibility.Collapsed;
+            CommunityResourceView.Visibility = Visibility.Collapsed;
 
             ApplyPacksVisibility();
         }
 
         private void ShowInstancesView()
         {
+            CloseEmbeddedUiForNavigation();
             _currentPage = MainPage.Instances;
             UpdateNavStyles();
 
@@ -346,12 +388,14 @@ namespace CMUmcl
             EmptyStateText.Visibility = Visibility.Collapsed;
             LoadingState.Visibility = Visibility.Collapsed;
             ErrorState.Visibility = Visibility.Collapsed;
+            CommunityResourceView.Visibility = Visibility.Collapsed;
 
             RefreshInstances();
         }
 
         private void ShowSettingsView()
         {
+            CloseEmbeddedUiForNavigation();
             _currentPage = MainPage.Settings;
             UpdateNavStyles();
 
@@ -368,8 +412,33 @@ namespace CMUmcl
             ErrorState.Visibility = Visibility.Collapsed;
             InstancesScroll.Visibility = Visibility.Collapsed;
             InstancesEmptyStateText.Visibility = Visibility.Collapsed;
+            CommunityResourceView.Visibility = Visibility.Collapsed;
 
             SettingsScroll.Visibility = Visibility.Visible;
+        }
+
+        private void ShowCommunityView()
+        {
+            CloseEmbeddedUiForNavigation();
+            _currentPage = MainPage.Community;
+            UpdateNavStyles();
+
+            HeaderTitleText.Text = "社区资源";
+            HeaderStatusText.Text = "搜索并安装 Mod / 整合包 / 数据包 / 资源包 / 光影包";
+            NewInstanceButton.Visibility = Visibility.Collapsed;
+            RefreshButton.Visibility = Visibility.Visible;
+
+            CardsScroll.Visibility = Visibility.Collapsed;
+            EmptyStateText.Visibility = Visibility.Collapsed;
+            LoadingState.Visibility = Visibility.Collapsed;
+            ErrorState.Visibility = Visibility.Collapsed;
+            InstancesScroll.Visibility = Visibility.Collapsed;
+            InstancesEmptyStateText.Visibility = Visibility.Collapsed;
+            SettingsScroll.Visibility = Visibility.Collapsed;
+
+            _community.RefreshTargets();
+            CommunityResourceView.Visibility = Visibility.Visible;
+            _ = _community.EnsureLoadedAsync();
         }
 
         private async void RefreshButton_Click(object sender, RoutedEventArgs e)
@@ -385,6 +454,10 @@ namespace CMUmcl
                     RefreshInstances();
                     break;
 
+                case MainPage.Community:
+                    _ = _community.SearchAsync();
+                    break;
+
                 default:
                     break;
             }
@@ -393,6 +466,7 @@ namespace CMUmcl
         private void NewInstanceButton_Click(object sender, RoutedEventArgs e)
         {
             if (_updatingLauncher) return;
+            CloseEmbeddedUiForNavigation();
             CreateInstanceView.Open(_localInstanceService, _launchService);
         }
 
@@ -451,6 +525,7 @@ namespace CMUmcl
             if (_updatingLauncher) return;
             if (sender is Button { DataContext: PackCardViewModel vm })
             {
+                if(!CanInstallPack(vm.InstanceId)){LauncherPrompt.Show(this,"此实例正在启动、运行或维护，请完成后再安装或更新。","实例正在使用");return;}
                 _activeOperations++;
                 try { await InstallAsync(vm); }
                 finally { _activeOperations--; }
@@ -495,15 +570,29 @@ namespace CMUmcl
 
         private void RefreshInstances()
         {
-            _instances.Clear();
-            foreach (var kv in _installedState.ListRecords())
+            var existing = _instances.ToDictionary(card => card.InstanceId, StringComparer.Ordinal);
+            var next = new List<InstanceCardViewModel>();
+            // Managed/server-pack instances stay above local custom instances.
+            foreach (var kv in _installedState.ListRecords()
+                         .OrderBy(kv => kv.Key.StartsWith(PackAutoUpdate.LocalIdPrefix, StringComparison.Ordinal) ? 1 : 0)
+                         .ThenBy(kv => kv.Key, StringComparer.Ordinal))
             {
-                _instances.Add(BuildInstanceCard(kv.Key, kv.Value));
+                var latest=BuildInstanceCard(kv.Key,kv.Value);
+                if(existing.TryGetValue(kv.Key,out InstanceCardViewModel? card) && string.Equals(card.InstallPath,latest.InstallPath,StringComparison.OrdinalIgnoreCase))
+                { card.RefreshPresentation(latest);next.Add(card); }
+                else next.Add(latest);
             }
 
+            _instances.Clear();
+            foreach (InstanceCardViewModel card in next)
+                _instances.Add(card);
+
             _instancesHeaderStatus = $"共 {_instances.Count} 个实例";
-            HeaderStatusText.Text = _instancesHeaderStatus;
-            ApplyInstancesVisibility();
+            if(_currentPage==MainPage.Instances)
+            {
+                HeaderStatusText.Text = _instancesHeaderStatus;
+                ApplyInstancesVisibility();
+            }
         }
 
         private static InstanceCardViewModel BuildInstanceCard(string id, InstanceRecord record)
@@ -545,6 +634,7 @@ namespace CMUmcl
             if (_updatingLauncher) return;
             if (sender is Button { DataContext: InstanceCardViewModel vm })
             {
+                if (IsInstanceBusy(vm) || _settingsWindows.Values.Any(x=>x.MaintenanceBusy)) return;
                 _activeOperations++;
                 try { await LaunchInstanceAsync(vm); }
                 finally { _activeOperations--; }
@@ -553,18 +643,17 @@ namespace CMUmcl
 
         private async Task LaunchInstanceAsync(InstanceCardViewModel vm)
         {
-            // Auto-update check for managed server packs (local instances and disabled
-            // auto-update launch the installed revision directly).
-            if (!await TryAutoUpdateBeforeLaunchAsync(vm))
-                return;
-
+            if (_launchRequests.ContainsKey(vm.InstanceId)) return;
+            using var cancellation = new CancellationTokenSource();
+            _launchRequests.Add(vm.InstanceId,cancellation);
             vm.BeginLaunch();
-
-            var progress = new Progress<LaunchProgress>(vm.ReportLaunchProgress);
-
+            var progress = new Progress<LaunchProgress>(p=>{if(!cancellation.IsCancellationRequested)vm.ReportLaunchProgress(p);});
             try
             {
-                LaunchResult result = await _launchService.LaunchLocalAsync(vm.InstanceId, _session, progress);
+                if (!await TryAutoUpdateBeforeLaunchAsync(vm,cancellation.Token)) return;
+                cancellation.Token.ThrowIfCancellationRequested();
+                LaunchResult result = await (_launchOverride != null ? _launchOverride(vm,cancellation.Token) : _launchService.LaunchLocalAsync(vm.InstanceId, _session, progress,cancellation.Token));
+                TrackGame(vm,result.Process);
 
                 // The session may have been refreshed during launch.
                 _session = result.Session;
@@ -581,7 +670,7 @@ namespace CMUmcl
             catch (LaunchException ex)
             {
                 vm.LaunchFail(ex.Message);
-                MessageBox.Show(this, ex.Message, "启动失败", MessageBoxButton.OK, MessageBoxImage.Warning);
+                LauncherPrompt.Show(this, ex.Message, "启动失败", MessageBoxButton.OK, MessageBoxImage.Warning);
             }
             catch (OperationCanceledException)
             {
@@ -590,8 +679,9 @@ namespace CMUmcl
             catch (Exception ex)
             {
                 vm.LaunchFail("启动失败，发生了未知错误。");
-                MessageBox.Show(this, "启动失败，发生了未知错误。\n" + ex.Message, "启动失败", MessageBoxButton.OK, MessageBoxImage.Error);
+                LauncherPrompt.Show(this, "启动失败，发生了未知错误。\n" + LaunchErrorDiagnostics.Describe(ex), "启动失败", MessageBoxButton.OK, MessageBoxImage.Error);
             }
+            finally { _launchRequests.Remove(vm.InstanceId); vm.ClearLaunchActionIfIdle(_gameProcesses.ContainsKey(vm.InstanceId)); }
         }
 
         // ------------------------------------------------------------------
@@ -603,7 +693,7 @@ namespace CMUmcl
         /// proceed (check/update failed). Local instances and disabled auto-update return true
         /// immediately so the installed revision is launched directly.
         /// </summary>
-        private async Task<bool> TryAutoUpdateBeforeLaunchAsync(InstanceCardViewModel vm)
+        private async Task<bool> TryAutoUpdateBeforeLaunchAsync(InstanceCardViewModel vm, CancellationToken ct = default)
         {
             string id = vm.InstanceId;
 
@@ -616,14 +706,15 @@ namespace CMUmcl
                 return true;
 
             int? installedRevision = _installedState.GetInstalledRevision(id);
-            ManifestInstance? manifest = await TryGetManifestInstanceAsync(id);
+            ManifestInstance? manifest = await TryGetManifestInstanceAsync(id,ct);
+            ct.ThrowIfCancellationRequested();
 
             PackAutoUpdateAction action = PackAutoUpdate.Decide(id, autoUpdateEnabled: true, installedRevision, manifest);
 
             if (action == PackAutoUpdateAction.FailClosed)
             {
                 vm.LaunchFail("无法检查整合包更新，未启动。");
-                MessageBox.Show(
+                LauncherPrompt.Show(
                     this,
                     "无法检查整合包更新（资源站不可用或整合包已下架），已取消启动，避免运行过旧版本。\n\n如要离线启动已安装版本，请在设置中关闭“启动前自动更新整合包”。",
                     "自动更新失败",
@@ -636,11 +727,11 @@ namespace CMUmcl
                 return true;
 
             // Update required: install the manifest revision before launching.
-            return await UpdatePackBeforeLaunchAsync(vm, manifest!);
+            return await UpdatePackBeforeLaunchAsync(vm, manifest!,ct);
         }
 
         /// <summary>Installs the manifest revision before launch; returns false (and does not launch) on failure.</summary>
-        private async Task<bool> UpdatePackBeforeLaunchAsync(InstanceCardViewModel vm, ManifestInstance manifest)
+        private async Task<bool> UpdatePackBeforeLaunchAsync(InstanceCardViewModel vm, ManifestInstance manifest, CancellationToken ct = default)
         {
             vm.BeginPackUpdate(manifest.Revision);
 
@@ -648,7 +739,7 @@ namespace CMUmcl
 
             try
             {
-                await _installer.InstallAsync(manifest, progress, CancellationToken.None);
+                await _installer.InstallAsync(manifest, progress, ct);
 
                 // InstallAsync already recorded the new revision; refresh the matching pack card
                 // (if present) so the 服务器整合包 page is not stale.
@@ -660,10 +751,11 @@ namespace CMUmcl
 
                 return true;
             }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
             catch (ResourceException ex)
             {
                 vm.LaunchFail("自动更新失败：" + ex.Message);
-                MessageBox.Show(
+                LauncherPrompt.Show(
                     this,
                     "自动更新失败，未启动旧版本：\n" + ex.Message + "\n\n如要离线启动已安装版本，请在设置中关闭“启动前自动更新整合包”。",
                     "自动更新失败",
@@ -674,7 +766,7 @@ namespace CMUmcl
             catch (Exception ex)
             {
                 vm.LaunchFail("自动更新失败：发生了未知错误。");
-                MessageBox.Show(
+                LauncherPrompt.Show(
                     this,
                     "自动更新失败，未启动旧版本。\n" + ex.Message + "\n\n如要离线启动已安装版本，请在设置中关闭“启动前自动更新整合包”。",
                     "自动更新失败",
@@ -688,7 +780,7 @@ namespace CMUmcl
         /// Resolves a manifest entry by id, preferring the already-loaded pack cards and falling
         /// back to a fresh manifest fetch. Returns null on not-found/fetch failure (caller errors).
         /// </summary>
-        private async Task<ManifestInstance?> TryGetManifestInstanceAsync(string id)
+        private async Task<ManifestInstance?> TryGetManifestInstanceAsync(string id, CancellationToken ct = default)
         {
             foreach (PackCardViewModel card in _cards)
             {
@@ -698,19 +790,34 @@ namespace CMUmcl
 
             try
             {
-                ResourceManifest manifest = await _manifestClient.GetManifestAsync();
+                ResourceManifest manifest = await _manifestClient.GetManifestAsync(ct);
                 foreach (ManifestInstance instance in manifest.Instances)
                 {
                     if (string.Equals(instance.Id, id, StringComparison.Ordinal))
                         return instance;
                 }
             }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
             catch
             {
                 // Fetch failure (network/signature/allowlist) — the caller fails closed.
             }
 
             return null;
+        }
+
+        private void InstanceSettings_Click(object sender, RoutedEventArgs e)
+        {
+            if(sender is not Button button || button.DataContext is not InstanceCardViewModel card)return;
+            OpenInstanceSettings(card);
+        }
+
+        private void RefreshAfterInstanceSettings()
+        {
+            _settings=_settingsStore.Load();
+            _community.RefreshTargets();
+            _loadingPreferences=true;try{LoadPreferenceControls();JavaPathTextBox.Text=_settings.JavaPath??"";}finally{_loadingPreferences=false;}
+            RefreshInstances();
         }
 
         private void OpenInstanceDirButton_Click(object sender, RoutedEventArgs e)
@@ -720,17 +827,11 @@ namespace CMUmcl
 
             try
             {
-                string dir = vm.InstallPath;
-                Directory.CreateDirectory(dir);
-                Process.Start(new ProcessStartInfo
-                {
-                    FileName = dir,
-                    UseShellExecute = true,
-                });
+                OpenInstanceContent(vm);
             }
             catch (Exception ex)
             {
-                MessageBox.Show(this, "无法打开目录：" + ex.Message, "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                LauncherPrompt.Show(this, "无法打开目录：" + ex.Message, "错误", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 
@@ -871,7 +972,7 @@ namespace CMUmcl
             }
             catch (Exception ex)
             {
-                MessageBox.Show(this, "无法打开目录：" + ex.Message, "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                LauncherPrompt.Show(this, "无法打开目录：" + ex.Message, "错误", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 
@@ -924,7 +1025,7 @@ namespace CMUmcl
             }
             catch (Exception ex)
             {
-                MessageBox.Show(this, "无法打开实例目录：" + ex.Message, "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                LauncherPrompt.Show(this, "无法打开实例目录：" + ex.Message, "错误", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 

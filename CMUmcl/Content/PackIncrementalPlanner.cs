@@ -111,11 +111,11 @@ namespace CMUmcl.Content
                 byte[] bytes = File.ReadAllBytes(target);
 
                 if (sha512.Length > 0 &&
-                    !string.Equals(PackFileSystem.ComputeHex(SHA512.HashData(bytes)), sha512, StringComparison.OrdinalIgnoreCase))
+                    !string.Equals(PackFileSystem.ComputeHex(Compat.Sha512(bytes)), sha512, StringComparison.OrdinalIgnoreCase))
                     return false;
 
                 if (sha1.Length > 0 &&
-                    !string.Equals(PackFileSystem.ComputeHex(SHA1.HashData(bytes)), sha1, StringComparison.OrdinalIgnoreCase))
+                    !string.Equals(PackFileSystem.ComputeHex(Compat.Sha1(bytes)), sha1, StringComparison.OrdinalIgnoreCase))
                     return false;
 
                 // A file with no usable hash can never be considered "valid"; it must be re-downloaded.

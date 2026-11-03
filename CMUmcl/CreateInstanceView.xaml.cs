@@ -125,6 +125,11 @@ namespace CMUmcl
         private bool _ready;
         private bool _creating;
         public bool HasActiveOperation => _creating || _importing;
+        public bool HasPendingTask => HasActiveOperation || _step == Step.Progress || _step == Step.Success;
+        public string TaskStatus => HasActiveOperation ? "实例正在下载 / 导入" : _step == Step.Success ? "实例已准备就绪" : "实例任务需要处理";
+        public event Action? OperationStateChanged;
+        internal Func<ManifestInstance, IProgress<LaunchProgress>, CancellationToken, Task>? ProvisionOverride { get; set; }
+        public void Resume() { Visibility = Visibility.Visible; OperationStateChanged?.Invoke(); }
         private bool _loadingGameVersions;
         private bool _loadingLoaderVersions;
         private bool _gameVersionsLoaded;
@@ -168,6 +173,8 @@ namespace CMUmcl
 
         public void Open(LocalInstanceService service, LaunchService launchService)
         {
+            if (HasPendingTask) { Resume(); return; }
+            _cts.Cancel();
             _service = service ?? throw new ArgumentNullException(nameof(service));
             _launchService = launchService ?? throw new ArgumentNullException(nameof(launchService));
 
@@ -191,6 +198,18 @@ namespace CMUmcl
             Visibility = Visibility.Collapsed;
             DisposeServices();
             ResetState();
+            OperationStateChanged?.Invoke();
+        }
+
+        /// <summary>
+        /// Hides the create flow for normal page navigation without cancelling an
+        /// in-flight install/import. The operation and its progress remain alive;
+        /// the instance list will pick up the completed record on the next refresh.
+        /// </summary>
+        public void HideForNavigation()
+        {
+            Visibility = Visibility.Collapsed;
+            OperationStateChanged?.Invoke();
         }
 
         private void DisposeServices()
@@ -206,6 +225,7 @@ namespace CMUmcl
         private void ResetState()
         {
             _sessionToken++;
+            _step = Step.Landing;
             _result = null;
             _selectedGameVersion = null;
             _selectedLoader = "vanilla";
@@ -244,6 +264,7 @@ namespace CMUmcl
         private void ShowStep(Step step)
         {
             _step = step;
+            OperationStateChanged?.Invoke();
 
             LandingPanel.Visibility = step == Step.Landing ? Visibility.Visible : Visibility.Collapsed;
             ImportPanel.Visibility = step == Step.Import ? Visibility.Visible : Visibility.Collapsed;
@@ -455,6 +476,7 @@ namespace CMUmcl
             finally
             {
                 _importing = false;
+                OperationStateChanged?.Invoke();
                 SetImportBusy(false);
             }
         }
@@ -489,6 +511,7 @@ namespace CMUmcl
             finally
             {
                 _importing = false;
+                OperationStateChanged?.Invoke();
                 SetImportBusy(false);
             }
         }
@@ -662,7 +685,11 @@ namespace CMUmcl
 
         private void NameBox_TextChanged(object sender, TextChangedEventArgs e)
         {
-            // Name is auto-defaulted on install when blank; nothing else to track.
+            if(InstancePathPreview==null || _service==null)return;
+            string name=NameBox.Text.Trim();if(name.Length==0)name=_defaultName;
+            if(name.Length==0){InstancePathPreview.Text="";return;}
+            try { var planned=_service.PreviewName(name);InstancePathPreview.Text=(planned.DisplayName!=name?"名称或目录已占用，将使用：":"实例目录：")+Path.Combine(LauncherPaths.InstancesDirectory,planned.Folder); }
+            catch { InstancePathPreview.Text="无法预览实例目录，请检查名称。"; }
         }
 
         private void SelectLoader(string key)
@@ -706,6 +733,7 @@ namespace CMUmcl
                 NameBox.Text = newDefault;
 
             _defaultName = newDefault;
+            NameBox_TextChanged(NameBox,new TextChangedEventArgs(TextBox.TextChangedEvent,UndoAction.None));
         }
 
         private void RefreshLoaderStepUi()
@@ -866,6 +894,12 @@ namespace CMUmcl
         private async void InstallButton_Click(object sender, RoutedEventArgs e)
         {
             if (_creating) return;
+            string name=NameBox.Text.Trim();if(name.Length==0)name=_defaultName;
+            if(_service!=null && name.Length>0)
+            {
+                var planned=_service.PreviewName(name);
+                if(planned.DisplayName!=name && LauncherPrompt.Show(Window.GetWindow(this),"名称或目录已占用，将新建“"+planned.DisplayName+"”，不会覆盖原目录。继续？","实例目录",MessageBoxButton.YesNo)!=MessageBoxResult.Yes)return;
+            }
             await InstallAsync();
         }
 
@@ -885,6 +919,8 @@ namespace CMUmcl
             ProgressStageText.Text = "正在创建实例…";
             ProgressMessageText.Text = string.Empty;
             ProvisionBar.IsIndeterminate = true;
+            ProvisionBar.Maximum = 100;
+            ProvisionBar.Value = 0;
 
             try
             {
@@ -903,6 +939,7 @@ namespace CMUmcl
                 {
                     _result = _service.Create(new CreateLocalInstanceRequest
                     {
+                        DeferRegistration = true,
                         DisplayName = name,
                         GameVersion = gameVersion,
                         Loader = loader,
@@ -918,7 +955,7 @@ namespace CMUmcl
                     Name = _result.DisplayName,
                     Revision = 1,
                 };
-                await _launchService.PrepareInstanceAsync(manifest, progress, _cts.Token);
+                await (ProvisionOverride != null ? ProvisionOverride(manifest, progress, _cts.Token) : _launchService.PrepareLocalInstanceAsync(_result, progress, _cts.Token));
 
                 if (needsFabricApi)
                 {
@@ -930,6 +967,8 @@ namespace CMUmcl
                         _fabricWarning = apiResult.ErrorMessage;
                 }
 
+                _cts.Token.ThrowIfCancellationRequested();
+                _service.RegisterPrepared(_result!);
                 ShowSuccess();
             }
             catch (LocalInstanceException ex)
@@ -951,6 +990,7 @@ namespace CMUmcl
             finally
             {
                 _creating = false;
+                OperationStateChanged?.Invoke();
             }
         }
 
@@ -961,7 +1001,7 @@ namespace CMUmcl
             ProgressMessageText.Text = string.Empty;
             ProgressErrorText.Text = message;
             ProgressErrorHint.Text = instanceCreated
-                ? "实例已保留，首次启动时会自动重试下载。"
+                ? "下载目录已保留，请在此处重试；完成后才会加入实例列表。"
                 : "实例尚未创建，可以重试。";
             ProgressErrorPanel.Visibility = Visibility.Visible;
             ProvisionBar.IsIndeterminate = false;
@@ -974,19 +1014,19 @@ namespace CMUmcl
             if (!string.IsNullOrWhiteSpace(text))
                 ProgressMessageText.Text = text;
 
+            double? percent = null;
             if (p.TotalTasks > 0)
-            {
-                ProvisionBar.IsIndeterminate = false;
-                ProvisionBar.Maximum = p.TotalTasks;
-                ProvisionBar.Value = p.ProgressedTasks;
-            }
+                percent = p.ProgressedTasks * 100.0 / p.TotalTasks;
             else if (p.TotalBytes > 0)
+                percent = p.ProgressedBytes * 100.0 / p.TotalBytes;
+
+            if (percent.HasValue)
             {
+                ProvisionBar.Maximum = 100;
                 ProvisionBar.IsIndeterminate = false;
-                ProvisionBar.Maximum = p.TotalBytes;
-                ProvisionBar.Value = p.ProgressedBytes;
+                ProvisionBar.Value = Math.Max(ProvisionBar.Value, Math.Min(100, Math.Max(0, percent.Value)));
             }
-            else
+            else if (ProvisionBar.Value <= 0)
             {
                 ProvisionBar.IsIndeterminate = true;
             }
@@ -998,14 +1038,15 @@ namespace CMUmcl
             {
                 ProgressMessageText.Text = $"正在下载 Fabric API：{FormatUtils.FormatBytes(done)} / {FormatUtils.FormatBytes(total)}";
                 ProvisionBar.IsIndeterminate = false;
-                ProvisionBar.Maximum = total;
-                ProvisionBar.Value = done;
+                ProvisionBar.Maximum = 100;
+                ProvisionBar.Value = Math.Max(ProvisionBar.Value, Math.Min(100, Math.Max(0, done * 100.0 / total)));
             }
             else
             {
                 if (!string.IsNullOrWhiteSpace(p.Message))
                     ProgressMessageText.Text = p.Message;
-                ProvisionBar.IsIndeterminate = true;
+                if (ProvisionBar.Value <= 0)
+                    ProvisionBar.IsIndeterminate = true;
             }
         }
 

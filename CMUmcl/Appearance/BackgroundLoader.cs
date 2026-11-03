@@ -21,7 +21,7 @@ public sealed class BackgroundLoader : IDisposable
     }
 
     public static string CachePath(string directory, string url)
-        => Path.Combine(directory, Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(url))) + ".image");
+        => Path.Combine(directory, Compat.Hex(Compat.Sha256(System.Text.Encoding.UTF8.GetBytes(url))) + ".image");
 
     public async Task<string> DownloadAsync(string url, string directory, CancellationToken ct)
         => (await DownloadImageAsync(url, directory, ct).ConfigureAwait(false)).Path;
@@ -56,8 +56,8 @@ public sealed class BackgroundLoader : IDisposable
                 if (media != null && !media.StartsWith("image/", StringComparison.OrdinalIgnoreCase) && media != "application/octet-stream")
                     throw new IOException("此地址未返回图片。请使用直接返回图片的 API。");
                 if (response.Content.Headers.ContentLength > MaxBytes) throw new IOException("背景图片不能超过 20 MB。");
-                await using (var input = await response.Content.ReadAsStreamAsync(timeout.Token).ConfigureAwait(false))
-                await using (var output = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None, 65536, true))
+                using (var input = await response.Content.ReadAsStreamAsync(timeout.Token).ConfigureAwait(false))
+                using (var output = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None, 65536, true))
                 {
                     byte[] buffer = new byte[65536]; long total = 0; int read;
                     while ((read = await input.ReadAsync(buffer, timeout.Token).ConfigureAwait(false)) > 0)
@@ -70,7 +70,7 @@ public sealed class BackgroundLoader : IDisposable
                 // Validate once and return the frozen bitmap for display, avoiding a second decode.
                 var image = await Task.Run(() => AppearanceManager.LoadImage(temp), timeout.Token).ConfigureAwait(false);
                 timeout.Token.ThrowIfCancellationRequested();
-                File.Move(temp, target, true);
+                Compat.Move(temp, target, true);
                 return (target, image);
             }
             throw new IOException("图片地址重定向次数过多。");

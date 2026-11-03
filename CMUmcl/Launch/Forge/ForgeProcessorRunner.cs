@@ -106,7 +106,7 @@ namespace CMUmcl.Launch.Forge
             => Path.GetFullPath(Path.Combine(librariesDir, MavenArtifact.ToRelativePath(coordinate)));
 
         public static string BuildClassPath(IEnumerable<string> coordinates, string librariesDir)
-            => string.Join(Path.PathSeparator, coordinates.Select(c => ResolveLibraryPath(c, librariesDir)));
+            => string.Join(Path.PathSeparator.ToString(), coordinates.Select(c => ResolveLibraryPath(c, librariesDir)));
 
         public static string StripQuotes(string s)
         {
@@ -199,11 +199,11 @@ namespace CMUmcl.Launch.Forge
                 CreateNoWindow = true,
                 WorkingDirectory = workingDir,
             };
-            psi.ArgumentList.Add("-cp");
-            psi.ArgumentList.Add(classpath);
-            psi.ArgumentList.Add(mainClass);
+            Compat.AddArgument(psi, "-cp");
+            Compat.AddArgument(psi, classpath);
+            Compat.AddArgument(psi, mainClass);
             foreach (string a in args)
-                psi.ArgumentList.Add(a);
+                Compat.AddArgument(psi, a);
 
             using var proc = new Process { StartInfo = psi };
             try

@@ -21,7 +21,7 @@ internal static class BackendInstallTests
         var web = Path.Combine(root, "web");
         Directory.CreateDirectory(data);
         Directory.CreateDirectory(Path.Combine(web, "files"));
-        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        using var key = new ECDsaCng(256);
         var keyPath = Path.Combine(root, "key.pem");
         File.WriteAllText(keyPath, key.ExportPkcs8PrivateKeyPem());
         File.WriteAllText(Path.Combine(data, "instances.json"), """[{"id":"integration","name":"Isolated integration pack","revision":0}]""");
@@ -41,15 +41,15 @@ internal static class BackendInstallTests
             Kestrel = new { Endpoints = new { Public = new { Url = publicOrigin }, Admin = new { Url = adminOrigin } } },
             Logging = new { LogLevel = new Dictionary<string, string> { ["Default"] = "Warning" } }
         }));
-        var password = Convert.ToHexString(RandomNumberGenerator.GetBytes(16));
-        var salt = RandomNumberGenerator.GetBytes(16);
+        var password = Compat.Hex(Compat.RandomBytes(16));
+        var salt = Compat.RandomBytes(16);
         var passwordHash = Rfc2898DeriveBytes.Pbkdf2(password, salt, 100000, HashAlgorithmName.SHA256, 32);
         var start = new ProcessStartInfo(Environment.ProcessPath!)
         {
             WorkingDirectory = root, UseShellExecute = false, CreateNoWindow = true,
             RedirectStandardOutput = true, RedirectStandardError = true,
         };
-        start.ArgumentList.Add(backendAssembly);
+        Compat.AddArgument(start, backendAssembly);
         start.Environment["DOTNET_ROLL_FORWARD"] = "LatestMajor";
         start.Environment["PCL_CMU_ADMIN_PASSWORD_HASH"] = $"pbkdf2$100000${Convert.ToBase64String(salt)}${Convert.ToBase64String(passwordHash)}";
         Process? process = null;
@@ -85,12 +85,12 @@ internal static class BackendInstallTests
                 check(login.StatusCode == HttpStatusCode.Redirect, "cross-repo: isolated backend login");
             admin.DefaultRequestHeaders.Add("X-CSRF-Token", csrf);
 
-            var payloads = new[] { RandomNumberGenerator.GetBytes(130000), RandomNumberGenerator.GetBytes(140000), RandomNumberGenerator.GetBytes(140000) };
-            var stableOverride = RandomNumberGenerator.GetBytes(170000);
-            var obsolete = RandomNumberGenerator.GetBytes(128);
+            var payloads = new[] { Compat.RandomBytes(130000), Compat.RandomBytes(140000), Compat.RandomBytes(140000) };
+            var stableOverride = Compat.RandomBytes(170000);
+            var obsolete = Compat.RandomBytes(128);
             File.WriteAllBytes(Path.Combine(web, "files", "obsolete.bin"), obsolete);
             using var manifests = new ResourceManifestClient(new LoopbackTransport(publicPort, requests),
-                new Uri(ResourceManifestClient.BaseUrl + "/"), key.ExportSubjectPublicKeyInfoPem());
+                new Uri(ResourceManifestClient.BaseUrl + "/"), Compat.ExportPem((ECDsaCng)key));
             var installed = new InstalledStateStore();
             using var installer = new PackInstaller(installed, new LoopbackTransport(publicPort, requests));
             for (var revision = 1; revision <= 3; revision++)
@@ -141,7 +141,7 @@ internal static class BackendInstallTests
                 using var response = await admin.PostAsJsonAsync("/admin/api/uploads", new
                 {
                     instanceId = "integration", fileName = Path.GetFileName(path), size = bytes.Length,
-                    sha256 = Convert.ToHexString(SHA256.HashData(bytes)), baseRevision
+                    sha256 = Compat.Hex(Compat.Sha256(bytes)), baseRevision
                 });
                 response.EnsureSuccessStatusCode();
                 using var created = JsonDocument.Parse(await response.Content.ReadAsByteArrayAsync());
@@ -159,7 +159,7 @@ internal static class BackendInstallTests
                     using var put = new HttpRequestMessage(HttpMethod.Put, $"/api/uploads/{id}/chunks/{index}");
                     put.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
                     put.Headers.Add("Origin", adminOrigin);
-                    put.Headers.Add("X-Chunk-SHA256", Convert.ToHexString(SHA256.HashData(chunk)));
+                    put.Headers.Add("X-Chunk-SHA256", Compat.Hex(Compat.Sha256(chunk)));
                     put.Content = new ByteArrayContent(chunk);
                     put.Content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
                     using var received = await ingress.SendAsync(put);
@@ -197,7 +197,7 @@ internal static class BackendInstallTests
         object Entry(string path, string file, byte[] content) => new
         {
             path, downloads = new[] { ResourceManifestClient.BaseUrl + "/files/" + file },
-            hashes = new { sha1 = Convert.ToHexString(SHA1.HashData(content)), sha512 = Convert.ToHexString(SHA512.HashData(content)) }, fileSize = content.Length
+            hashes = new { sha1 = Compat.Hex(Compat.Sha1(content)), sha512 = Compat.Hex(Compat.Sha512(content)) }, fileSize = content.Length
         };
         var files = new List<object> { Entry("mods/test.bin", $"mod-{revision}.bin", payload) };
         if (revision == 1) files.Add(Entry("mods/obsolete.bin", "obsolete.bin", obsolete));

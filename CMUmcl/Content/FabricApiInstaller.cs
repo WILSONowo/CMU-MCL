@@ -223,8 +223,8 @@ namespace CMUmcl.Content
 
                 // Stream to a temp file and hash incrementally. The file handle must be
                 // released (using block ends) before the file can be moved into place.
-                await using (var contentStream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false))
-                await using (var fileStream = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None, 81920, useAsync: true))
+                using (var contentStream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false))
+                using (var fileStream = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None, 81920, useAsync: true))
                 {
                     var buffer = new byte[81920];
                     int read;
@@ -259,7 +259,7 @@ namespace CMUmcl.Content
 
                 if (File.Exists(targetPath))
                     File.Delete(targetPath);
-                File.Move(tempPath, targetPath);
+                Compat.Move(tempPath, targetPath);
                 return true;
             }
             finally
@@ -273,7 +273,7 @@ namespace CMUmcl.Content
             if (string.IsNullOrWhiteSpace(expectedHex))
                 return true;
 
-            string actual = Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
+            string actual = Compat.Hex(hash.GetHashAndReset()).ToLowerInvariant();
             return string.Equals(actual, expectedHex.Trim().ToLowerInvariant(), StringComparison.OrdinalIgnoreCase);
         }
 

@@ -30,10 +30,10 @@ public static class MemoryAllocation
     public static int Recommend(MemorySnapshot memory, int javaBits = 64)
     {
         if (memory.TotalMb <= 0) return javaBits == 32 ? 1024 : 2048;
-        long available = Math.Clamp(memory.AvailableMb, 0, memory.TotalMb);
+        long available = Compat.Clamp(memory.AvailableMb, 0, memory.TotalMb);
         long budget = Math.Min(memory.TotalMb / 2, available - Math.Max(768, memory.TotalMb / 8));
         long ceiling = javaBits == 32 ? 1024 : 8192;
-        return (int)Math.Clamp(budget / 256 * 256, 512, ceiling);
+        return (int)Compat.Clamp(budget / 256 * 256, 512, ceiling);
     }
 
     public static int Resolve(AppSettings settings, JavaInfo java, MemorySnapshot memory)

@@ -139,7 +139,7 @@ namespace CMUmcl.Content
                     TotalFiles = files.Count,
                     Message = file.Path,
                 });
-                await DownloadFileAsync(file, instanceDir, ct).ConfigureAwait(false);
+                await DownloadFileAsync(file, instanceDir, progress, ct).ConfigureAwait(false);
             }
 
             // 4. Extract overrides/ then client-overrides/ into the instance dir.
@@ -280,7 +280,7 @@ namespace CMUmcl.Content
                 throw new ResourceException("下载文件索引超时。", ex);
             }
 
-            string actualSha256 = PackFileSystem.ComputeHex(SHA256.HashData(bytes));
+            string actualSha256 = PackFileSystem.ComputeHex(Compat.Sha256(bytes));
             if (!string.Equals(actualSha256, expectedSha256, StringComparison.OrdinalIgnoreCase))
                 throw new ResourceException("文件索引校验失败（哈希不匹配）。");
 
@@ -354,7 +354,7 @@ namespace CMUmcl.Content
                     string finalTarget = PackFileSystem.ResolveUnder(instanceDir, PackFileSystem.SanitizeRelativePath(relPath));
 
                     Directory.CreateDirectory(Path.GetDirectoryName(finalTarget)!);
-                    File.Move(stagingTarget, finalTarget, overwrite: true);
+                    Compat.Move(stagingTarget, finalTarget, overwrite: true);
                 }
 
                 foreach (string relPath in plan.Delete)
@@ -510,7 +510,7 @@ namespace CMUmcl.Content
                 InstalledAt = DateTimeOffset.UtcNow,
             };
 
-            await File.WriteAllTextAsync(
+            await Compat.WriteAllTextAsync(
                 Path.Combine(instanceDir, "instance.json"),
                 JsonSerializer.Serialize(metadata, JsonOptions),
                 ct).ConfigureAwait(false);
@@ -610,7 +610,7 @@ namespace CMUmcl.Content
         // Individual file download + verification
         // ------------------------------------------------------------------
 
-        private async Task DownloadFileAsync(ModrinthFile file, string instanceDir, CancellationToken ct)
+        private async Task DownloadFileAsync(ModrinthFile file, string instanceDir, IProgress<PackInstallProgress>? progress, CancellationToken ct)
         {
             string relativePath = PackFileSystem.SanitizeRelativePath(file.Path);
             string targetPath = PackFileSystem.ResolveUnder(instanceDir, relativePath);
@@ -628,7 +628,14 @@ namespace CMUmcl.Content
             try
             {
                 downloaded = await ResumableDownload.DownloadMirrorsAsync(_http, file.Downloads, targetPath,
-                    new DownloadExpectation(file.FileSize, file.Hashes?.Sha512, Sha1: file.Hashes?.Sha1), ct).ConfigureAwait(false);
+                    new DownloadExpectation(file.FileSize, file.Hashes?.Sha512, Sha1: file.Hashes?.Sha1), ct,
+                    (received, total) => progress?.Report(new PackInstallProgress
+                    {
+                        Stage = "下载文件",
+                        BytesDownloaded = received,
+                        TotalBytes = total,
+                        Message = file.Path,
+                    })).ConfigureAwait(false);
             }
             catch (IOException ex) { throw new ResourceException($"文件下载失败：{file.Path}，已保留可用断点。", ex); }
 
@@ -653,9 +660,9 @@ namespace CMUmcl.Content
                 var sha512 = PackFileSystem.NormalizeHex(file.Hashes?.Sha512);
                 var sha1 = PackFileSystem.NormalizeHex(file.Hashes?.Sha1);
                 if (!string.IsNullOrEmpty(sha512))
-                    return string.Equals(PackFileSystem.ComputeHex(SHA512.HashData(stream)), sha512, StringComparison.OrdinalIgnoreCase);
+                    return string.Equals(PackFileSystem.ComputeHex(Compat.Sha512(stream)), sha512, StringComparison.OrdinalIgnoreCase);
                 if (!string.IsNullOrEmpty(sha1))
-                    return string.Equals(PackFileSystem.ComputeHex(SHA1.HashData(stream)), sha1, StringComparison.OrdinalIgnoreCase);
+                    return string.Equals(PackFileSystem.ComputeHex(Compat.Sha1(stream)), sha1, StringComparison.OrdinalIgnoreCase);
                 return true;
             }
             catch
@@ -689,9 +696,9 @@ namespace CMUmcl.Content
             string lower1 = PackFileSystem.NormalizeHex(file.Hashes?.Sha1);
 
             if (!string.IsNullOrEmpty(lower512))
-                return string.Equals(PackFileSystem.ComputeHex(SHA512.HashData(bytes)), lower512, StringComparison.OrdinalIgnoreCase);
+                return string.Equals(PackFileSystem.ComputeHex(Compat.Sha512(bytes)), lower512, StringComparison.OrdinalIgnoreCase);
             if (!string.IsNullOrEmpty(lower1))
-                return string.Equals(PackFileSystem.ComputeHex(SHA1.HashData(bytes)), lower1, StringComparison.OrdinalIgnoreCase);
+                return string.Equals(PackFileSystem.ComputeHex(Compat.Sha1(bytes)), lower1, StringComparison.OrdinalIgnoreCase);
 
             return true;
         }
@@ -773,8 +780,16 @@ namespace CMUmcl.Content
         private static (string Path, int Suffix) PickInstallPath(string root, string id, string recordedPath)
         {
             string candidate = SafeInstanceName(recordedPath) ?? id;
+            string candidateDir = Path.Combine(root, candidate);
 
-            if (!Directory.Exists(Path.Combine(root, candidate)) || IsOurInstance(Path.Combine(root, candidate), id))
+            if (!Directory.Exists(candidateDir) || IsOurInstance(candidateDir, id))
+                return (candidate, 0);
+
+            // A failed first install can leave a partial directory named after the pack id
+            // without instance.json. Reuse it for the same id instead of creating "id-2"
+            // and appending an unnecessary "(2)" to the display name.
+            if (string.Equals(candidate, id, StringComparison.OrdinalIgnoreCase)
+                && !File.Exists(Path.Combine(candidateDir, "instance.json")))
                 return (candidate, 0);
 
             string baseName = candidate;

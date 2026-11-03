@@ -51,11 +51,11 @@ public sealed class BackgroundController : IDisposable
         _automatic = settings.BackgroundAutoSwitch;
         _shuffle = settings.BackgroundShuffle;
         _timer.Stop();
-        _timer.Interval = TimeSpan.FromSeconds(Math.Clamp(settings.BackgroundIntervalSeconds, 10, 3600));
+        _timer.Interval = TimeSpan.FromSeconds(Compat.Clamp(settings.BackgroundIntervalSeconds, 10, 3600));
         var kind = settings.BackgroundMode ?? BackgroundKind.Default;
         var images = settings.BackgroundImages.ToArray();
         string url = settings.BackgroundUrl;
-        string key = kind + "|" + (kind == BackgroundKind.Local ? string.Join('\n', images.Select(i => i.Path)) : kind == BackgroundKind.Network ? url : "");
+        string key = kind + "|" + (kind == BackgroundKind.Local ? string.Join("\n", images.Select(i => i.Path)) : kind == BackgroundKind.Network ? url : "");
         if (key == _sourceKey) { UpdateTimer(); return Task.CompletedTask; }
         _kind = kind; _url = url; _images = images; _sourceKey = key; _index = -1;
         UpdateTimer();
@@ -101,7 +101,7 @@ public sealed class BackgroundController : IDisposable
             else
             {
                 var candidates = Enumerable.Range(0, _images.Length).Where(i => _images.Length == 1 || i != _index).ToList();
-                if (_shuffle) Random.Shared.Shuffle(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(candidates));
+                if (_shuffle) Compat.Shuffle(candidates);
                 else candidates = candidates.OrderBy(i => (i - _index - 1 + _images.Length) % _images.Length).ToList();
                 foreach (int i in candidates)
                 {

@@ -152,9 +152,9 @@ public partial class MainWindow
             if (automatic) MemoryTextBox.Text = recommended.ToString();
             MemoryTextBox.IsEnabled = MemorySlider.IsEnabled = !automatic;
             MemorySlider.Maximum = Math.Max(512, memory.TotalMb > 0 ? memory.TotalMb : 32768);
-            MemorySlider.Value = Math.Clamp(displayed, 512, MemorySlider.Maximum);
+            MemorySlider.Value = Compat.Clamp(displayed, 512, MemorySlider.Maximum);
             SystemMemoryText.Text = memory.TotalMb > 0 ? $"已使用 {(memory.TotalMb - memory.AvailableMb) / 1024.0:F1} GiB / 总内存 {memory.TotalMb / 1024.0:F1} GiB" : "暂时无法读取系统内存";
-            MemoryUsageBar.Value = memory.TotalMb > 0 ? Math.Clamp(displayed * 100.0 / memory.TotalMb, 0, 100) : 0;
+            MemoryUsageBar.Value = memory.TotalMb > 0 ? Compat.Clamp(displayed * 100.0 / memory.TotalMb, 0, 100) : 0;
             MemoryAdviceText.Text = automatic
                 ? $"游戏分配 {recommended / 1024.0:F1} GiB；启动时根据可用内存重新计算。"
                 : $"游戏分配 {displayed / 1024.0:F1} GiB。";

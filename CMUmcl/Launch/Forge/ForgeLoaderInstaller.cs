@@ -119,7 +119,7 @@ namespace CMUmcl.Launch.Forge
 
                 // 2. 解析
                 progress?.Report(new LaunchProgress { Stage = "安装 Forge", Message = "正在解析 Forge 安装器…" });
-                byte[] installerBytes = await File.ReadAllBytesAsync(installerPath, ct).ConfigureAwait(false);
+                byte[] installerBytes = await Compat.ReadAllBytesAsync(installerPath, ct).ConfigureAwait(false);
                 ParsedForgeInstaller parsed = ForgeInstallerParser.Parse(installerBytes, staging);
 
                 // 3. 下载安装器库
@@ -139,9 +139,9 @@ namespace CMUmcl.Launch.Forge
                 Directory.CreateDirectory(versionDir);
 
                 string versionJsonText = parsed.FinalVersionDocument.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
-                await File.WriteAllTextAsync(Path.Combine(versionDir, versionId + ".json"), versionJsonText, ct).ConfigureAwait(false);
-                await File.WriteAllTextAsync(Path.Combine(versionDir, "install_profile.json"), parsed.InstallProfileJson, ct).ConfigureAwait(false);
-                await File.WriteAllTextAsync(Path.Combine(versionDir, ".forge-complete"), expectedSha1, ct).ConfigureAwait(false);
+                await Compat.WriteAllTextAsync(Path.Combine(versionDir, versionId + ".json"), versionJsonText, ct).ConfigureAwait(false);
+                await Compat.WriteAllTextAsync(Path.Combine(versionDir, "install_profile.json"), parsed.InstallProfileJson, ct).ConfigureAwait(false);
+                await Compat.WriteAllTextAsync(Path.Combine(versionDir, ".forge-complete"), expectedSha1, ct).ConfigureAwait(false);
 
                 progress?.Report(new LaunchProgress { Stage = "安装 Forge", Message = $"Forge {versionId} 安装完成。" });
                 return versionId;
@@ -299,8 +299,8 @@ namespace CMUmcl.Launch.Forge
                     throw new LaunchException(failureMessage);
 
                 using var sha1 = IncrementalHash.CreateHash(HashAlgorithmName.SHA1);
-                await using var content = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
-                await using var fs = new FileStream(targetPath, FileMode.Create, FileAccess.Write, FileShare.None, 81920, useAsync: true);
+                using var content = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+                using var fs = new FileStream(targetPath, FileMode.Create, FileAccess.Write, FileShare.None, 81920, useAsync: true);
 
                 var buffer = new byte[81920];
                 long total = 0;
@@ -312,7 +312,7 @@ namespace CMUmcl.Launch.Forge
                     total += read;
                 }
 
-                string actual = Convert.ToHexString(sha1.GetHashAndReset()).ToLowerInvariant();
+                string actual = Compat.Hex(sha1.GetHashAndReset()).ToLowerInvariant();
                 bool sizeOk = expectedSize <= 0 || total == expectedSize;
                 bool sha1Ok = string.IsNullOrWhiteSpace(expectedSha1)
                     || string.Equals(actual, expectedSha1.Trim().ToLowerInvariant(), StringComparison.OrdinalIgnoreCase);
@@ -337,7 +337,7 @@ namespace CMUmcl.Launch.Forge
         }
 
         private static TimeSpan RetryDelayFor(int attempt)
-            => attempt - 1 < RetryDelays.Length ? RetryDelays[attempt - 1] : RetryDelays[^1];
+            => attempt - 1 < RetryDelays.Length ? RetryDelays[attempt - 1] : RetryDelays[RetryDelays.Length-1];
 
         private static LaunchException Sha1DownloadError(Exception ex) => ex switch
         {

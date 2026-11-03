@@ -31,25 +31,25 @@ internal static partial class Program
             var clock = Stopwatch.StartNew();
             await Task.Delay(delay);
             process.Refresh();
-            var gc = GC.GetGCMemoryInfo();
+
             samples.Add(new {
                 stage, workingSetMiB = process.WorkingSet64 / 1048576d,
                 privateMiB = process.PrivateMemorySize64 / 1048576d,
                 managedAllocatedMiB = GC.GetTotalMemory(false) / 1048576d,
-                gcCommittedMiB = gc.TotalCommittedBytes / 1048576d,
+                gcCommittedMiB = (double?)null,
                 cpuSeconds = (process.TotalProcessorTime - startCpu).TotalSeconds,
                 elapsedSeconds = clock.Elapsed.TotalSeconds,
-                totalAllocatedBytes = GC.GetTotalAllocatedBytes(false),
+                totalAllocatedBytes = (long?)null,
             });
             File.WriteAllText(Path.Combine(_output, "performance.json"), JsonSerializer.Serialize(samples, new JsonSerializerOptions { WriteIndented = true }));
         }
         await Sample("visible-idle");
         var settings = store.Load();
-        long start = GC.GetTotalAllocatedBytes(true);
+        // Framework does not expose cumulative allocation counters.
         var clock = Stopwatch.StartNew();
         for (int i = 0; i < 100; i++) await AppearanceManager.ApplyAsync(settings);
         File.WriteAllText(Path.Combine(_output, "appearance-reapply.json"), JsonSerializer.Serialize(new {
-            allocatedBytes = GC.GetTotalAllocatedBytes(true) - start, elapsedMs = clock.Elapsed.TotalMilliseconds
+            allocatedBytes = (long?)null, elapsedMs = clock.Elapsed.TotalMilliseconds
         }));
         await Sample("after-100-unchanged-settings");
         window.WindowState = WindowState.Minimized;

@@ -208,7 +208,7 @@ namespace CMUmcl.Content
                 // Atomic write: temp file then move over the target.
                 string temp = LauncherPaths.InstalledStatePath + ".tmp";
                 File.WriteAllText(temp, json);
-                File.Move(temp, LauncherPaths.InstalledStatePath, overwrite: true);
+                Compat.Move(temp, LauncherPaths.InstalledStatePath, overwrite: true);
                 return true;
             }
             catch

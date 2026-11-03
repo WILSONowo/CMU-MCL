@@ -32,17 +32,18 @@ internal sealed class DownloadedContent
 
 internal static class ResumableDownload
 {
+    private sealed class DownloadHttpException(string message,HttpStatusCode status) : HttpRequestException(message) { public HttpStatusCode StatusCode {get;}=status; }
     private sealed record Receipt(string Identity, string? ETag);
     private const long MaximumBytes = 2L * 1024 * 1024 * 1024;
 
     public static async Task<DownloadedContent> DownloadMirrorsAsync(HttpClient http, IEnumerable<string> urls,
-        string target, DownloadExpectation expected, CancellationToken ct)
+        string target, DownloadExpectation expected, CancellationToken ct, Action<long, long?>? progress = null)
     {
         Exception? failure = null;
         foreach (var url in urls.Where(u => Uri.TryCreate(u, UriKind.Absolute, out var uri) && uri.Scheme == "https")
                      .Distinct(StringComparer.Ordinal).Take(4))
         {
-            try { return await DownloadAsync(http, url, target, expected, null, ct).ConfigureAwait(false); }
+            try { return await DownloadAsync(http, url, target, expected, progress, ct).ConfigureAwait(false); }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
             catch (Exception ex) when (ex is IOException or HttpRequestException or OperationCanceledException) { failure = ex; }
         }
@@ -61,20 +62,20 @@ internal static class ResumableDownload
         if (expected.HasHash && File.Exists(target) && new FileInfo(target).Length <= limit &&
             (expected.Size is null || new FileInfo(target).Length == expected.Size))
         {
-            await using var cached = File.OpenRead(target);
+            using var cached = File.OpenRead(target);
             var verified = await HashAsync(cached, ct).ConfigureAwait(false);
             if (expected.Matches(verified)) { progress?.Invoke(verified.Size, verified.Size); return verified; }
         }
         var partial = target + ".partial";
         var receiptPath = partial + ".json";
-        var identity = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { url, expected }))));
+        var identity = Compat.Hex(Compat.Sha256(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { url, expected }))));
         Receipt? receipt = null;
-        try { if (File.Exists(receiptPath)) receipt = JsonSerializer.Deserialize<Receipt>(await File.ReadAllBytesAsync(receiptPath, ct).ConfigureAwait(false)); }
+        try { if (File.Exists(receiptPath)) receipt = JsonSerializer.Deserialize<Receipt>(await Compat.ReadAllBytesAsync(receiptPath, ct).ConfigureAwait(false)); }
         catch (JsonException) { /* Interrupted metadata: restart from zero. */ }
         DownloadedContent result;
         using var overall = CancellationTokenSource.CreateLinkedTokenSource(ct);
         overall.CancelAfter(TimeSpan.FromMinutes(30));
-        await using (var output = new FileStream(partial, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None,
+        using (var output = new FileStream(partial, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None,
             131072, FileOptions.Asynchronous | FileOptions.SequentialScan))
         {
             if (!expected.HasHash || receipt?.Identity != identity || output.Length > limit)
@@ -84,6 +85,7 @@ internal static class ResumableDownload
             Exception? lastFailure = null;
             for (var attempt = 0; attempt < 4; attempt++)
             {
+                TimeSpan retryDelay = TimeSpan.FromMilliseconds(300 * (1 << attempt));
                 overall.Token.ThrowIfCancellationRequested();
                 // A fully received partial may remain after cancellation/response loss.
                 if (expected.HasHash && expected.Size == output.Length)
@@ -110,9 +112,15 @@ internal static class ResumableDownload
                     headerTimeout.CancelAfter(Timeout.InfiniteTimeSpan);
                     if (response.StatusCode == HttpStatusCode.RequestedRangeNotSatisfiable && offset > 0)
                     { output.SetLength(0); throw new IOException("服务器不接受当前断点，重新下载。"); }
-                    if (response.StatusCode is HttpStatusCode.RequestTimeout or HttpStatusCode.TooManyRequests || (int)response.StatusCode >= 500)
-                        throw new HttpRequestException("下载服务暂时不可用。", null, response.StatusCode);
-                    response.EnsureSuccessStatusCode();
+                    if (response.StatusCode == (HttpStatusCode)429)
+                        retryDelay = RetryAfterPolicy.Delay(response, retryDelay, DateTimeOffset.UtcNow);
+                    if (response.StatusCode == HttpStatusCode.Unauthorized &&
+                        Uri.TryCreate(url, UriKind.Absolute, out var authUri) && CMUmcl.Community.CommunityHosts.CurseForgeCdn.Contains(authUri.Host))
+                        throw new DownloadHttpException("CurseForge 访问凭据无效，请联系启动器维护者。", response.StatusCode);
+                    if (response.StatusCode is HttpStatusCode.RequestTimeout or (HttpStatusCode)429 || (int)response.StatusCode >= 500)
+                        throw new DownloadHttpException("下载服务暂时不可用。", response.StatusCode);
+                    if (!response.IsSuccessStatusCode)
+                        throw new DownloadHttpException("下载响应失败：HTTP " + (int)response.StatusCode, response.StatusCode);
                     long? total;
                     if (response.StatusCode == HttpStatusCode.PartialContent)
                     {
@@ -138,7 +146,7 @@ internal static class ResumableDownload
                     receipt = new Receipt(identity, etag is { IsWeak: false } ? etag.ToString() : null);
                     await SaveReceiptAsync(receiptPath, receipt, overall.Token).ConfigureAwait(false);
                     output.Position = offset;
-                    await using var input = await response.Content.ReadAsStreamAsync(overall.Token).ConfigureAwait(false);
+                    using var input = await response.Content.ReadAsStreamAsync(overall.Token).ConfigureAwait(false);
                     var buffer = new byte[131072];
                     using var idle = CancellationTokenSource.CreateLinkedTokenSource(overall.Token);
                     while (true)
@@ -148,7 +156,7 @@ internal static class ResumableDownload
                         idle.CancelAfter(Timeout.InfiniteTimeSpan);
                         if (read == 0) break;
                         if (output.Position + read > limit) throw new InvalidDataException("下载超出声明大小。");
-                        await output.WriteAsync(buffer.AsMemory(0, read), overall.Token).ConfigureAwait(false);
+                        await output.WriteAsync(buffer, 0, read, overall.Token).ConfigureAwait(false);
                         progress?.Invoke(output.Position, expected.Size ?? total);
                     }
                     await output.FlushAsync(overall.Token).ConfigureAwait(false);
@@ -164,18 +172,18 @@ internal static class ResumableDownload
                     output.SetLength(0); // Invalid data must not be reused on retry.
                     throw;
                 }
-                catch (HttpRequestException ex) when (ex.StatusCode is null or HttpStatusCode.RequestTimeout or HttpStatusCode.TooManyRequests || (int?)ex.StatusCode >= 500)
+                catch (HttpRequestException ex) when ((ex as DownloadHttpException)?.StatusCode is null or HttpStatusCode.RequestTimeout or (HttpStatusCode)429 || (int?)(ex as DownloadHttpException)?.StatusCode >= 500)
                 { lastFailure = ex; }
                 catch (IOException ex) { lastFailure = ex; }
                 catch (OperationCanceledException ex) when (!overall.IsCancellationRequested) { lastFailure = ex; }
                 await output.FlushAsync(overall.Token).ConfigureAwait(false);
-                if (attempt < 3) await Task.Delay(300 * (1 << attempt), overall.Token).ConfigureAwait(false);
+                if (attempt < 3) await RetryAfterPolicy.WaitAsync(retryDelay, overall.Token).ConfigureAwait(false);
             }
             throw new IOException("多次下载失败，已保留断点，可稍后重试。", lastFailure);
         Verified:
             await output.FlushAsync(overall.Token).ConfigureAwait(false);
         }
-        File.Move(partial, target, overwrite: true);
+        Compat.Move(partial, target, overwrite: true);
         File.Delete(receiptPath);
         progress?.Invoke(result.Size, result.Size);
         return result;
@@ -184,8 +192,8 @@ internal static class ResumableDownload
     private static async Task SaveReceiptAsync(string path, Receipt receipt, CancellationToken ct)
     {
         var temporary = path + ".tmp";
-        await File.WriteAllBytesAsync(temporary, JsonSerializer.SerializeToUtf8Bytes(receipt), ct).ConfigureAwait(false);
-        File.Move(temporary, path, overwrite: true);
+        await Compat.WriteAllBytesAsync(temporary, JsonSerializer.SerializeToUtf8Bytes(receipt), ct).ConfigureAwait(false);
+        Compat.Move(temporary, path, overwrite: true);
     }
 
     private static async Task<DownloadedContent> HashAsync(Stream stream, CancellationToken ct)
@@ -202,8 +210,8 @@ internal static class ResumableDownload
             size += read;
         }
         return new DownloadedContent { Size = size,
-            Sha1 = Convert.ToHexString(sha1.GetHashAndReset()).ToLowerInvariant(),
-            Sha256 = Convert.ToHexString(sha256.GetHashAndReset()).ToLowerInvariant(),
-            Sha512 = Convert.ToHexString(sha512.GetHashAndReset()).ToLowerInvariant() };
+            Sha1 = Compat.Hex(sha1.GetHashAndReset()).ToLowerInvariant(),
+            Sha256 = Compat.Hex(sha256.GetHashAndReset()).ToLowerInvariant(),
+            Sha512 = Compat.Hex(sha512.GetHashAndReset()).ToLowerInvariant() };
     }
 }

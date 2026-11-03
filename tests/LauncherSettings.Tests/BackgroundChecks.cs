@@ -104,16 +104,16 @@ internal static partial class Program
             await offline.ConfigureAsync(new AppSettings{BackgroundMode=BackgroundKind.Network,BackgroundUrl=url,BackgroundAutoSwitch=false});
             Check(offline.Image!=null && offline.Error!=null && offline.CurrentPath==path,"restart offline uses cached network image and reports failure");
         }
-        var entered=new TaskCompletionSource();var release=new TaskCompletionSource();
+        var entered=new TaskCompletionSource<bool>();var release=new TaskCompletionSource<bool>();
         using(var racing=new BackgroundController(Path.Combine(_output,"race-cache"),new BackgroundLoader(new HttpClient(new ImageHandler(async(request,ct)=>
         {
-            entered.SetResult();await release.Task;return ImageResponse();
+            entered.SetResult(true);await release.Task;return ImageResponse();
         })))))
         {
             var old=racing.ConfigureAsync(new AppSettings{BackgroundMode=BackgroundKind.Network,BackgroundUrl=url,BackgroundAutoSwitch=false});
             await entered.Task;
             await racing.ConfigureAsync(new AppSettings{BackgroundMode=BackgroundKind.Local,BackgroundImages=[new(second,"second")],BackgroundAutoSwitch=false});
-            release.SetResult();await old;
+            release.SetResult(true);await old;
             Check(racing.CurrentPath==second && racing.Error==null,"late network response cannot overwrite a newer local background");
         }
     }
@@ -125,5 +125,5 @@ internal sealed class ImageHandler(Func<HttpRequestMessage,CancellationToken,Tas
 internal sealed class UnknownLengthContent(byte[] bytes):HttpContent
 {
     protected override bool TryComputeLength(out long length) { length=0;return false; }
-    protected override Task SerializeToStreamAsync(Stream stream,TransportContext? context) => stream.WriteAsync(bytes).AsTask();
+    protected override Task SerializeToStreamAsync(Stream stream,TransportContext? context) => stream.WriteAsync(bytes,0,bytes.Length);
 }

@@ -10,9 +10,10 @@ namespace CMUmcl
     {
         public string InstanceId { get; }
         public string InstallPath { get; }
-        public string DisplayName { get; }
+        public string DisplayName { get; private set; }
+        public string? IconSource { get; private set; }
         public string SourceText { get; }
-        public string GameText { get; }
+        public string GameText { get; private set; }
         public string PathText { get; }
 
         /// <summary>
@@ -30,6 +31,8 @@ namespace CMUmcl
             InstanceId = id;
             InstallPath = instanceDir;
             DisplayName = displayName;
+            IconSource=LoaderIcon(metadata);
+            try { var options=InstanceOptionsStore.Load(instanceDir);if(!string.IsNullOrWhiteSpace(options.Name))DisplayName=options.Name!;if(options.Icon!=null)IconSource="/Assets/InstanceIcons/"+options.Icon; } catch { /* Settings editor reports invalid settings; retain original card. */ }
             SourceText = sourceText;
             PathText = instanceDir;
 
@@ -44,6 +47,28 @@ namespace CMUmcl
                 GameText = $"Minecraft {metadata.Game ?? "?"} · {FormatLoader(metadata.Loader, metadata.LoaderVersion)}";
                 StatusText = "已就绪";
             }
+        }
+
+        internal void RefreshPresentation(InstanceCardViewModel latest)
+        {
+            DisplayName=latest.DisplayName;IconSource=latest.IconSource;GameText=latest.GameText;
+            OnPropertyChanged(nameof(DisplayName));OnPropertyChanged(nameof(IconSource));OnPropertyChanged(nameof(GameText));
+        }
+
+        private static string? LoaderIcon(InstanceMetadata? metadata)
+        {
+            if(metadata==null)return null;
+            string? file=(metadata.Loader??"").Trim().ToLowerInvariant() switch
+            {
+                "fabric"=>"Fabric.png",
+                "forge"=>"Forge.png",
+                "neoforge"=>"NeoForge.png",
+                "quilt"=>"Quilt.png",
+                "optifine"=>"OptiFine.png",
+                "" or "vanilla"=>"grass-block.png",
+                _=>null,
+            };
+            return file==null?null:"/Assets/InstanceIcons/"+file;
         }
 
         /// <summary>Formats a loader/version pair for display, with a friendly label for vanilla.</summary>
@@ -63,6 +88,12 @@ namespace CMUmcl
             string version = (loaderVersion ?? string.Empty).Trim();
             return string.IsNullOrEmpty(version) ? label : $"{label} {version}";
         }
+
+        private string _launchActionText = "";
+        public string LaunchActionText { get=>_launchActionText; private set { _launchActionText=value;OnPropertyChanged();OnPropertyChanged(nameof(HasLaunchAction)); } }
+        public bool HasLaunchAction => LaunchActionText.Length>0;
+        internal void ClearLaunchActionIfIdle(bool running) { if(!running)LaunchActionText=""; }
+        internal void GameExited() { LaunchActionText="";LaunchFail("游戏已退出"); }
 
         private string _statusText = string.Empty;
         public string StatusText
@@ -111,6 +142,7 @@ namespace CMUmcl
         {
             ButtonEnabled = false;
             ButtonText = "启动中…";
+            LaunchActionText="取消启动";
             IsProgressVisible = true;
             IsIndeterminate = true;
             ProgressValue = 0;
@@ -122,6 +154,7 @@ namespace CMUmcl
         {
             ButtonEnabled = false;
             ButtonText = "更新中…";
+            LaunchActionText="取消启动";
             IsProgressVisible = true;
             IsIndeterminate = true;
             ProgressValue = 0;
@@ -135,34 +168,24 @@ namespace CMUmcl
             if (!string.IsNullOrEmpty(p.Message))
                 StatusText = p.Message;
 
+            double? percent = null;
             if (p.Stage == "下载整合包")
             {
                 if (p.TotalBytes is long total && total > 0)
-                {
-                    IsIndeterminate = false;
-                    ProgressValue = p.BytesDownloaded * 100.0 / total;
-                }
-                else
-                {
-                    IsIndeterminate = true;
-                }
+                    percent = p.BytesDownloaded * 100.0 / total;
             }
             else if (p.Stage == "下载文件")
             {
-                if (p.TotalFiles > 0)
-                {
-                    IsIndeterminate = false;
-                    ProgressValue = p.CurrentFile * 100.0 / p.TotalFiles;
-                }
-                else
-                {
-                    IsIndeterminate = true;
-                }
+                if (p.TotalBytes is long bytes && bytes > 0)
+                    percent = p.BytesDownloaded * 100.0 / bytes;
+                else if (p.TotalFiles > 0)
+                    percent = p.CurrentFile * 100.0 / p.TotalFiles;
             }
-            else
-            {
+
+            if (percent.HasValue)
+                AdvanceProgress(percent.Value);
+            else if (ProgressValue <= 0)
                 IsIndeterminate = true;
-            }
         }
 
         /// <summary>Marks the launch as failed and re-enables the button.</summary>
@@ -172,6 +195,7 @@ namespace CMUmcl
             ButtonEnabled = true;
             ButtonText = "启动游戏";
             StatusText = message;
+            LaunchActionText="";
         }
 
         /// <summary>Marks the launch as started (game process running).</summary>
@@ -181,6 +205,7 @@ namespace CMUmcl
             ButtonEnabled = true;
             ButtonText = "启动游戏";
             StatusText = "游戏已启动";
+            ButtonEnabled=false;LaunchActionText="结束游戏";
         }
 
         /// <summary>
@@ -193,6 +218,7 @@ namespace CMUmcl
             ButtonEnabled = true;
             ButtonText = "启动游戏";
             StatusText = "游戏进程已启动，等待窗口/请查看日志";
+            ButtonEnabled=false;LaunchActionText="结束游戏";
         }
 
         /// <summary>Applies a launch progress report to the card.</summary>
@@ -202,20 +228,23 @@ namespace CMUmcl
             if (!string.IsNullOrEmpty(p.Message))
                 StatusText = p.Message;
 
+            double? percent = null;
             if (p.TotalTasks > 0)
-            {
-                IsIndeterminate = false;
-                ProgressValue = p.ProgressedTasks * 100.0 / p.TotalTasks;
-            }
+                percent = p.ProgressedTasks * 100.0 / p.TotalTasks;
             else if (p.TotalBytes > 0)
-            {
-                IsIndeterminate = false;
-                ProgressValue = p.ProgressedBytes * 100.0 / p.TotalBytes;
-            }
-            else
-            {
+                percent = p.ProgressedBytes * 100.0 / p.TotalBytes;
+
+            if (percent.HasValue)
+                AdvanceProgress(percent.Value);
+            else if (ProgressValue <= 0)
                 IsIndeterminate = true;
-            }
+        }
+
+        private void AdvanceProgress(double percent)
+        {
+            if (double.IsNaN(percent) || double.IsInfinity(percent)) return;
+            ProgressValue = Math.Max(ProgressValue, Math.Min(100, Math.Max(0, percent)));
+            IsIndeterminate = false;
         }
 
         public event PropertyChangedEventHandler? PropertyChanged;

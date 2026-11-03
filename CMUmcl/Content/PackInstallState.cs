@@ -98,7 +98,7 @@ namespace CMUmcl.Content
 
             string temp = path + ".tmp";
             File.WriteAllText(temp, json);
-            File.Move(temp, path, overwrite: true);
+            Compat.Move(temp, path, overwrite: true);
         }
     }
 }

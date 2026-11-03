@@ -105,7 +105,7 @@ public static class UpdateTransaction
         {
             File.Copy(source, temporary, overwrite: false);
             // The old file stays intact if a lock prevents the final rename.
-            File.Move(temporary, target, overwrite: true);
+            Compat.Move(temporary, target, overwrite: true);
         }
         finally
         {

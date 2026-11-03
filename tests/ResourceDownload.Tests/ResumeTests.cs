@@ -9,8 +9,8 @@ internal static class ResumeTests
     {
         var root = Path.Combine(Path.GetTempPath(), "cmumcl-download-tests-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
-        var bytes = RandomNumberGenerator.GetBytes(270000);
-        var expected = new DownloadExpectation(bytes.Length, Sha256: Convert.ToHexString(SHA256.HashData(bytes)));
+        var bytes = Compat.RandomBytes(270000);
+        var expected = new DownloadExpectation(bytes.Length, Sha256: Compat.Hex(Compat.Sha256(bytes)));
         try
         {
             var calls = 0;
@@ -46,8 +46,8 @@ internal static class ResumeTests
                     check(File.ReadAllText(target) == "old installed file", mode + ": incomplete download cannot overwrite installed file");
                 }
                 long? requestedRange = null;
-                var resumedBytes = mode == "changed-identity" ? RandomNumberGenerator.GetBytes(bytes.Length) : bytes;
-                var resumedExpected = expected with { Sha256 = Convert.ToHexString(SHA256.HashData(resumedBytes)) };
+                var resumedBytes = mode == "changed-identity" ? Compat.RandomBytes(bytes.Length) : bytes;
+                var resumedExpected = expected with { Sha256 = Compat.Hex(Compat.Sha256(resumedBytes)) };
                 using var secondHttp = Client(request =>
                 {
                     requestedRange = request.Headers.Range?.Ranges.Single().From;
@@ -126,7 +126,7 @@ internal static class ResumeTests
     }
     private static HttpResponseMessage Range(byte[] bytes, long offset)
     {
-        var response = Response(new MemoryStream(bytes[(int)offset..]), bytes.Length - offset);
+        var response = Response(new MemoryStream(bytes.Skip((int)offset).ToArray()), bytes.Length - offset);
         response.StatusCode = HttpStatusCode.PartialContent;
         response.Content.Headers.ContentRange = new ContentRangeHeaderValue(offset, bytes.Length - 1, bytes.Length);
         return response;
@@ -138,14 +138,14 @@ internal static class ResumeTests
     }
     private sealed class CutStream(byte[] bytes, int cut, CancellationTokenSource? cancellation = null) : MemoryStream(bytes)
     {
-        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken ct = default)
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken ct)
         {
             if (Position >= cut)
             {
                 if (cancellation is not null) { cancellation.Cancel(); ct.ThrowIfCancellationRequested(); }
                 throw new IOException("Simulated connection loss");
             }
-            return base.ReadAsync(buffer[..Math.Min(buffer.Length, cut - (int)Position)], ct);
+            return base.ReadAsync(buffer,offset,Math.Min(count, cut - (int)Position),ct);
         }
     }
 }

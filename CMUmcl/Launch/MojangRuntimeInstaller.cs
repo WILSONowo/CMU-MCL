@@ -111,7 +111,7 @@ namespace CMUmcl.Launch
                     "Java 运行时清单校验失败，已中止。", progress, 0, 0, null, 0, ct).ConfigureAwait(false);
 
                 var manifest = JsonSerializer.Deserialize<RuntimeManifest>(
-                        await File.ReadAllTextAsync(manifestPath, ct).ConfigureAwait(false), JsonOptions)
+                        await Compat.ReadAllTextAsync(manifestPath, ct).ConfigureAwait(false), JsonOptions)
                     ?? throw new LaunchException("Java 运行时清单为空或格式无效。");
 
                 Dictionary<string, RuntimeFileEntry> files = manifest.Files ?? new Dictionary<string, RuntimeFileEntry>();
@@ -284,7 +284,7 @@ namespace CMUmcl.Launch
                 while ((read = fs.Read(buffer, 0, buffer.Length)) > 0)
                     sha1.AppendData(buffer, 0, read);
 
-                string actual = Convert.ToHexString(sha1.GetHashAndReset()).ToLowerInvariant();
+                string actual = Compat.Hex(sha1.GetHashAndReset()).ToLowerInvariant();
                 return string.Equals(actual, expectedSha1.Trim().ToLowerInvariant(), StringComparison.OrdinalIgnoreCase);
             }
             catch
@@ -380,8 +380,8 @@ namespace CMUmcl.Launch
                     throw new LaunchException($"下载 Java 运行时失败（HTTP {(int)response.StatusCode}）。");
 
                 using var sha1 = IncrementalHash.CreateHash(HashAlgorithmName.SHA1);
-                await using var contentStream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
-                await using var fileStream = new FileStream(targetPath, FileMode.Create, FileAccess.Write, FileShare.None, 81920, useAsync: true);
+                using var contentStream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+                using var fileStream = new FileStream(targetPath, FileMode.Create, FileAccess.Write, FileShare.None, 81920, useAsync: true);
 
                 var buffer = new byte[81920];
                 long attemptBytes = 0;
@@ -406,7 +406,7 @@ namespace CMUmcl.Launch
                     }
                 }
 
-                string actualSha1 = Convert.ToHexString(sha1.GetHashAndReset()).ToLowerInvariant();
+                string actualSha1 = Compat.Hex(sha1.GetHashAndReset()).ToLowerInvariant();
                 bool sizeOk = expectedSize <= 0 || attemptBytes == expectedSize;
                 bool sha1Ok = string.IsNullOrWhiteSpace(expectedSha1)
                     || string.Equals(actualSha1, expectedSha1.Trim().ToLowerInvariant(), StringComparison.OrdinalIgnoreCase);
@@ -458,7 +458,7 @@ namespace CMUmcl.Launch
         }
 
         private static TimeSpan RetryDelayFor(int attempt)
-            => attempt - 1 < RetryDelays.Length ? RetryDelays[attempt - 1] : RetryDelays[^1];
+            => attempt - 1 < RetryDelays.Length ? RetryDelays[attempt - 1] : RetryDelays[RetryDelays.Length-1];
 
         private static LaunchException IndexDownloadError(Exception ex) => ex switch
         {

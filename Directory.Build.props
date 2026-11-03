@@ -1,0 +1,8 @@
+<Project><PropertyGroup Condition="'$(CMUMCL_CF_PRIVATE_BUILD_ROOT)' != ''">
+<PrivateOutputProjectName>$([System.IO.Path]::GetFileName('$(MSBuildProjectDirectory)'))</PrivateOutputProjectName>
+<BaseIntermediateOutputPath>$(CMUMCL_CF_PRIVATE_BUILD_ROOT)\obj\$(PrivateOutputProjectName)\</BaseIntermediateOutputPath>
+<MSBuildProjectExtensionsPath>$(CMUMCL_CF_PRIVATE_BUILD_ROOT)\obj\$(PrivateOutputProjectName)\</MSBuildProjectExtensionsPath>
+<BaseOutputPath>$(CMUMCL_CF_PRIVATE_BUILD_ROOT)\bin\$(PrivateOutputProjectName)\</BaseOutputPath>
+<DefaultItemExcludes>$(DefaultItemExcludes);bin\**;obj\**</DefaultItemExcludes>
+<SkipUpdaterBuildCopy>true</SkipUpdaterBuildCopy>
+</PropertyGroup><PropertyGroup><LangVersion>latest</LangVersion></PropertyGroup><ItemGroup><PackageReference Include="System.Text.Json" Version="8.0.5"/><PackageReference Include="System.Runtime.CompilerServices.Unsafe" Version="6.1.2"/><Reference Include="System.Net.Http"/><Reference Include="System.IO.Compression"/><Reference Include="System.IO.Compression.FileSystem"/><Reference Include="System.Security"/><Reference Include="System.Windows.Forms"/><Reference Include="PresentationFramework"/><Reference Include="PresentationCore"/><Reference Include="WindowsBase"/><Compile Condition="'$(MSBuildProjectName)' != 'Bottom.Tests' and '$(MSBuildProjectName)' != 'ResourceDownload.Tests' and '$(MSBuildProjectName)' != 'LauncherSettings.Tests' and '$(MSBuildProjectName)' != 'Loader.Acceptance' and '$(MSBuildProjectName)' != 'Community.Tests' and '$(MSBuildProjectName)' != 'Community.LiveProbe' and '$(MSBuildProjectName)' != 'Community.DirectProbe'" Include="$(MSBuildThisFileDirectory)Compatibility.cs" Link="Compatibility.cs"/></ItemGroup></Project>

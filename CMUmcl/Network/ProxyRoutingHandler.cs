@@ -23,13 +23,13 @@ internal sealed class ProxyRoutingHandler(bool redirects, bool cookies, Decompre
         Pool pool;
         lock (_gate)
         {
-            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (_disposed) throw new ObjectDisposedException(nameof(ProxyRoutingHandler));
             var config = LauncherProxy.Snapshot();
             if (_current == null || _current.Config != config)
             {
                 var proxy = LauncherProxy.GetProxy(config);
                 var handler = new HttpClientHandler { AllowAutoRedirect = redirects, UseCookies = cookies,
-                    AutomaticDecompression = decompression, UseProxy = config.Mode != Content.LauncherProxyMode.Direct, Proxy = proxy };
+                    AutomaticDecompression = decompression, Proxy = proxy, UseProxy = config.Mode != Content.LauncherProxyMode.Direct };
                 if (_current != null) Retire(_current);
                 _current = new Pool(config, new HttpMessageInvoker(handler));
             }
@@ -68,11 +68,8 @@ internal sealed class ProxyRoutingHandler(bool redirects, bool cookies, Decompre
         }
         protected override bool TryComputeLength(out long length) { length = _inner.Headers.ContentLength ?? 0; return _inner.Headers.ContentLength.HasValue; }
         protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context) => _inner.CopyToAsync(stream);
-        protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context, CancellationToken ct) => _inner.CopyToAsync(stream, ct);
         protected override async Task<Stream> CreateContentReadStreamAsync()
             => new LeasedStream(await _inner.ReadAsStreamAsync().ConfigureAwait(false), Release);
-        protected override async Task<Stream> CreateContentReadStreamAsync(CancellationToken ct)
-            => new LeasedStream(await _inner.ReadAsStreamAsync(ct).ConfigureAwait(false), Release);
         private void Release() => Interlocked.Exchange(ref _release, null)?.Invoke();
         protected override void Dispose(bool disposing)
         {
@@ -93,17 +90,12 @@ internal sealed class ProxyRoutingHandler(bool redirects, bool cookies, Decompre
         public override void SetLength(long value) => inner.SetLength(value);
         public override int Read(byte[] buffer, int offset, int count) => inner.Read(buffer, offset, count);
         public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken ct) => inner.ReadAsync(buffer, offset, count, ct);
-        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken ct = default) => inner.ReadAsync(buffer, ct);
         public override void Write(byte[] buffer, int offset, int count) => inner.Write(buffer, offset, count);
         public override Task CopyToAsync(Stream destination, int bufferSize, CancellationToken ct) => inner.CopyToAsync(destination, bufferSize, ct);
         protected override void Dispose(bool disposing)
         {
             if (disposing) { try { inner.Dispose(); } finally { release(); } }
             base.Dispose(disposing);
-        }
-        public override async ValueTask DisposeAsync()
-        {
-            try { await inner.DisposeAsync().ConfigureAwait(false); } finally { release(); GC.SuppressFinalize(this); }
         }
     }
 }

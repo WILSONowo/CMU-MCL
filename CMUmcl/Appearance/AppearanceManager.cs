@@ -48,7 +48,7 @@ public static class AppearanceManager
     public static Task ApplyAsync(AppSettings settings)
     {
         _mode = settings.Theme;
-        _opacity = Math.Clamp(double.IsFinite(settings.BackgroundOpacity) ? settings.BackgroundOpacity : 0.25, 0.05, 1);
+        _opacity = Compat.Clamp(Compat.IsFinite(settings.BackgroundOpacity) ? settings.BackgroundOpacity : 0.25, 0.05, 1);
         if (_background == null)
         {
             _background = new BackgroundController(Path.Combine(LauncherPaths.CacheDirectory, "backgrounds"));
@@ -168,7 +168,7 @@ public static class AppearanceManager
 
     public static BitmapSource LoadImage(string path)
     {
-        if (!Path.IsPathFullyQualified(path)) throw new IOException("请选择本机图片文件。");
+        if (!Compat.IsPathFullyQualified(path)) throw new IOException("请选择本机图片文件。");
         using var stream = File.OpenRead(path);
         if (stream.Length > 20 * 1024 * 1024) throw new IOException("背景图片不能超过 20 MB。");
         var decoder = BitmapDecoder.Create(stream, BitmapCreateOptions.DelayCreation, BitmapCacheOption.None);
@@ -195,7 +195,7 @@ public static class AppearanceManager
         using var stream = File.OpenRead(source);
         string stem = Path.GetFileNameWithoutExtension(source);
         stem = new string(stem.Where(c => !Path.GetInvalidFileNameChars().Contains(c)).Take(40).ToArray());
-        string name = stem + "_" + Convert.ToHexString(SHA256.HashData(stream))[..12] + Path.GetExtension(source).ToLowerInvariant();
+        string name = stem + "_" + Compat.Hex(Compat.Sha256(stream)).Substring(0,12) + Path.GetExtension(source).ToLowerInvariant();
         string target = Path.Combine(directory, name);
         if (!File.Exists(target)) File.Copy(source, target);
         return target;

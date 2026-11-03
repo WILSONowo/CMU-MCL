@@ -80,7 +80,7 @@ namespace CMUmcl.Content
                 return false;
 
             // Windows drive-letter absolute path, e.g. "C:" or "c:foo".
-            if (path.Length >= 2 && char.IsAsciiLetter(path[0]) && path[1] == ':')
+            if (path.Length >= 2 && Compat.IsAsciiLetter(path[0]) && path[1] == ':')
                 return false;
 
             foreach (var segment in path.Split('/', '\\'))

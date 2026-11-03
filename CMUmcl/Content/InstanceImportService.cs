@@ -321,8 +321,9 @@ namespace CMUmcl.Content
                 bool hasInherits = TryGetPropertyCi(root, "inheritsFrom", out var inheritsEl) && inheritsEl.ValueKind == JsonValueKind.String;
                 bool hasType = TryGetPropertyCi(root, "type", out _);
                 bool hasLibraries = TryGetPropertyCi(root, "libraries", out var librariesEl) && librariesEl.ValueKind == JsonValueKind.Array;
+                bool hasPatches=TryGetPropertyCi(root,"patches",out var patches) && patches.ValueKind==JsonValueKind.Array;
 
-                if (!hasInherits && !hasType && !hasLibraries)
+                if (!hasInherits && !hasType && !hasLibraries && !hasPatches)
                     return null; // Not a version JSON.
 
                 string? game = null;
@@ -332,6 +333,15 @@ namespace CMUmcl.Content
                     if (IsReleaseLike(inherits))
                         game = inherits;
                 }
+
+                // PCL and other launchers merge loader/base JSON and retain the
+                // underlying Minecraft version in clientVersion instead of inheritsFrom.
+                string? clientVersion=GetStringCi(root,"clientVersion");
+                if(game==null && IsReleaseLike(clientVersion))game=clientVersion;
+                if(game==null && hasPatches)
+                    foreach(var patch in patches.EnumerateArray())
+                        if(GetStringCi(patch,"id")=="game" && IsReleaseLike(GetStringCi(patch,"version")))
+                        {game=GetStringCi(patch,"version");break;}
 
                 if (game == null && IsReleaseLike(id))
                     game = id;
@@ -349,6 +359,18 @@ namespace CMUmcl.Content
                         loader = fromLibraries.Value.Loader;
                         loaderVersion = fromLibraries.Value.Version;
                     }
+                }
+
+                if (loader == "vanilla")
+                {
+                    if(hasPatches)
+                        foreach(var patch in patches.EnumerateArray())
+                        {
+                            string patchId=NormalizeLoader(GetStringCi(patch,"id"));
+                            string? version=GetStringCi(patch,"version");
+                            if((patchId=="fabric" || patchId=="quilt" || patchId=="forge" || patchId=="neoforge") && !string.IsNullOrWhiteSpace(version))
+                            {loader=patchId;loaderVersion=StripGamePrefix(version!,game);break;}
+                        }
                 }
 
                 if (loader == "vanilla")
@@ -626,7 +648,7 @@ namespace CMUmcl.Content
                 {
                     ct.ThrowIfCancellationRequested();
 
-                    string relative = Path.GetRelativePath(source, file);
+                    string relative = Compat.GetRelativePath(source, file);
                     string dest = Path.Combine(target, relative);
                     Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
 

@@ -1,3 +1,0 @@
-#include <windows.h>
-1 ICON "../CMUmcl/Assets/CMUmcl.ico"
-1 RT_MANIFEST "bootstrap.manifest"

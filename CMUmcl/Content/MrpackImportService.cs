@@ -38,22 +38,27 @@ namespace CMUmcl.Content
             _installedState = installedState ?? throw new ArgumentNullException(nameof(installedState));
             _instancesRoot = NormalizeInstancesRoot(instancesRoot);
 
-            var handler = CMUmcl.Network.LauncherProxy.CreateHandler();
+            var handler = CMUmcl.Network.LauncherProxy.CreateHandler(allowAutoRedirect: false, useCookies: false);
 
             _http = CreateClient(handler);
         }
 
         /// <summary>Test seam: uses a caller-supplied handler (e.g. a fake local server).</summary>
         internal MrpackImportService(InstalledStateStore installedState, string? instancesRoot, HttpMessageHandler handler)
+            : this(installedState, instancesRoot, handler, () => CMUmcl.Community.CommunityFeatures.EnabledCurseForgeKey) { }
+
+        internal MrpackImportService(InstalledStateStore installedState, string? instancesRoot, HttpMessageHandler handler, Func<string?> apiKeyProvider)
         {
             _installedState = installedState ?? throw new ArgumentNullException(nameof(installedState));
             _instancesRoot = NormalizeInstancesRoot(instancesRoot);
-            _http = CreateClient(handler);
+            _http = CreateClient(handler, apiKeyProvider);
         }
 
-        private static HttpClient CreateClient(HttpMessageHandler handler)
+        private static HttpClient CreateClient(HttpMessageHandler handler, Func<string?>? apiKeyProvider = null)
         {
-            var client = new HttpClient(handler)
+            var client = new HttpClient(new CMUmcl.Community.SafeRedirectHandler(
+                new CMUmcl.Community.CurseForgeRequestHandler(handler, apiKeyProvider ?? (() => CMUmcl.Community.CommunityFeatures.EnabledCurseForgeKey), api: false),
+                _ => true, sameHostOnly: false))
             {
                 // Individual mods can be large; use a generous timeout.
                 Timeout = TimeSpan.FromMinutes(30),
@@ -500,8 +505,8 @@ namespace CMUmcl.Content
                 using var sha1 = IncrementalHash.CreateHash(HashAlgorithmName.SHA1);
                 using var sha512 = IncrementalHash.CreateHash(HashAlgorithmName.SHA512);
 
-                await using var content = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
-                await using var fileStream = new FileStream(targetPath, FileMode.Create, FileAccess.Write, FileShare.None, 81920, useAsync: true);
+                using var content = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+                using var fileStream = new FileStream(targetPath, FileMode.Create, FileAccess.Write, FileShare.None, 81920, useAsync: true);
 
                 long contentLength = response.Content.Headers.ContentLength ?? 0;
                 var buffer = new byte[81920];

@@ -9,9 +9,9 @@ namespace CMUmcl.Network;
 public static class LauncherProxy
 {
     // Capture the OS/environment proxy before installing the process-local fallback.
-    private static readonly IWebProxy SystemProxy = HttpClient.DefaultProxy;
+    private static readonly IWebProxy SystemProxy = WebRequest.DefaultWebProxy;
     private static readonly IWebProxy DynamicProxy = new FollowingProxy();
-    public static void Initialize() => HttpClient.DefaultProxy = DynamicProxy;
+    public static void Initialize() => WebRequest.DefaultWebProxy = DynamicProxy;
     public static HttpMessageHandler CreateHandler(bool allowAutoRedirect = true, bool useCookies = true,
         DecompressionMethods decompression = DecompressionMethods.GZip | DecompressionMethods.Deflate)
         => new ProxyRoutingHandler(allowAutoRedirect, useCookies, decompression);
@@ -31,7 +31,7 @@ public static class LauncherProxy
         address = null;
         if (mode is not (LauncherProxyMode.Http or LauncherProxyMode.Socks5) || port is < 1 or > 65535) return false;
         host = host.Trim();
-        if (host.StartsWith('[') && host.EndsWith(']')) host = host[1..^1];
+        if (host.StartsWith('[') && host.EndsWith(']')) host = host.Substring(1,host.Length-2);
         if (Uri.CheckHostName(host) == UriHostNameType.Unknown || host.IndexOfAny(['/', '\\', '@', '?', '#']) >= 0) return false;
         try { address = new UriBuilder(mode == LauncherProxyMode.Http ? "http" : "socks5", host, port).Uri; return true; }
         catch (UriFormatException) { return false; }
@@ -42,16 +42,32 @@ public static class LauncherProxy
         if (c.Mode == LauncherProxyMode.Direct) return new WebProxy();
         // Fail closed on broken persisted custom settings; never silently use a direct route.
         if (!TryAddress(c.Mode, c.Host, c.Port, out var address)) throw new HttpRequestException("代理主机或端口无效，请检查代理设置。");
+        if(c.Mode==LauncherProxyMode.Socks5) return SocksBridge(c);
         var proxy = new WebProxy(address!);
         if (c.Authentication) proxy.Credentials = new NetworkCredential(c.Username, Unprotect(c.PasswordProtected));
         return proxy;
     }
+    private static readonly object BridgesGate=new();
+    private static readonly System.Collections.Generic.Dictionary<Configuration,MihaZupan.HttpToSocks5Proxy> Bridges=new();
+    private static IWebProxy SocksBridge(Configuration c)
+    {
+        lock(BridgesGate)
+        {
+            if(!Bridges.TryGetValue(c,out var bridge))
+            {
+                bridge=c.Authentication ? new MihaZupan.HttpToSocks5Proxy(c.Host,c.Port,c.Username,Unprotect(c.PasswordProtected)) : new MihaZupan.HttpToSocks5Proxy(c.Host,c.Port);
+                Bridges.Add(c,bridge);
+            }
+            return bridge;
+        }
+    }
+    public static void Shutdown() { lock(BridgesGate) { foreach(var b in Bridges.Values)b.StopInternalServer();Bridges.Clear(); } }
     public static string Protect(string password) => password.Length == 0 ? "" : Convert.ToBase64String(
-        ProtectedData.Protect(Encoding.UTF8.GetBytes(password), "CMUmcl proxy"u8.ToArray(), DataProtectionScope.CurrentUser));
+        ProtectedData.Protect(Encoding.UTF8.GetBytes(password), Encoding.UTF8.GetBytes("CMUmcl proxy"), DataProtectionScope.CurrentUser));
     public static string Unprotect(string encrypted)
     {
         if (encrypted.Length == 0) return "";
-        try { return Encoding.UTF8.GetString(ProtectedData.Unprotect(Convert.FromBase64String(encrypted), "CMUmcl proxy"u8.ToArray(), DataProtectionScope.CurrentUser)); }
+        try { return Encoding.UTF8.GetString(ProtectedData.Unprotect(Convert.FromBase64String(encrypted), Encoding.UTF8.GetBytes("CMUmcl proxy"), DataProtectionScope.CurrentUser)); }
         catch (Exception ex) when (ex is CryptographicException or FormatException)
         { throw new HttpRequestException("无法读取代理密码，请重新输入。", ex); }
     }

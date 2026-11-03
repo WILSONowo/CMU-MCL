@@ -194,31 +194,26 @@ namespace CMUmcl
             IsProgressVisible = true;
             StatusText = p.Message;
 
+            double? percent = null;
             if (p.Stage == "下载整合包")
             {
                 if (p.TotalBytes is long total && total > 0)
-                {
-                    IsIndeterminate = false;
-                    ProgressValue = p.BytesDownloaded * 100.0 / total;
-                }
-                else
-                {
-                    IsIndeterminate = true;
-                }
+                    percent = p.BytesDownloaded * 100.0 / total;
             }
             else if (p.Stage == "下载文件")
             {
-                if (p.TotalFiles > 0)
-                {
-                    IsIndeterminate = false;
-                    ProgressValue = p.CurrentFile * 100.0 / p.TotalFiles;
-                }
-                else
-                {
-                    IsIndeterminate = true;
-                }
+                if (p.TotalBytes is long bytes && bytes > 0)
+                    percent = p.BytesDownloaded * 100.0 / bytes;
+                else if (p.TotalFiles > 0)
+                    percent = p.CurrentFile * 100.0 / p.TotalFiles;
             }
-            else
+
+            if (percent.HasValue)
+            {
+                ProgressValue = Math.Max(ProgressValue, Math.Min(100, Math.Max(0, percent.Value)));
+                IsIndeterminate = false;
+            }
+            else if (ProgressValue <= 0)
             {
                 IsIndeterminate = true;
             }

@@ -104,6 +104,53 @@ namespace CMUmcl.Launch
             return prepared.VersionName;
         }
 
+        /// <summary>Prepares a new draft before publishing it to the installed-state store.</summary>
+        public async Task<string> PrepareLocalInstanceAsync(LocalInstanceResult local, IProgress<LaunchProgress>? progress = null, CancellationToken ct = default)
+        {
+            string directory = PackFileSystem.ResolveUnder(LauncherPaths.InstancesDirectory, PackFileSystem.SanitizeRelativePath(local.InstallPath));
+            if (!string.Equals(directory, Path.GetFullPath(local.InstanceDirectory), StringComparison.OrdinalIgnoreCase))
+                throw new LaunchException("实例目录与创建记录不一致。");
+            var metadata = System.Text.Json.JsonSerializer.Deserialize<InstanceMetadata>(
+                await Compat.ReadAllTextAsync(Path.Combine(directory, "instance.json"), ct).ConfigureAwait(false));
+            if (metadata?.Id != local.Id) throw new LaunchException("实例信息与创建记录不一致。");
+            PreparedInstall prepared = await PrepareCoreAsync(directory, metadata, progress, ct).ConfigureAwait(false);
+            return prepared.VersionName;
+        }
+
+        internal Func<string,InstanceMetadata,IProgress<LaunchProgress>?,CancellationToken,Task<string>>? MaintenanceProvisionOverride;
+        internal Func<string,string,string,CancellationToken,Task>? MaintenanceValidateOverride;
+        internal async Task<string> MaintainInstanceAsync(string directory,string game,string loader,string loaderVersion,bool repair,IProgress<LaunchProgress>? progress,CancellationToken ct)
+        {
+            ct.ThrowIfCancellationRequested();
+            InstanceMaintenance.EnsureStopped(directory);
+            loader=string.IsNullOrWhiteSpace(loader)?"vanilla":loader.ToLowerInvariant();
+            var current=InstanceMaintenance.Read(directory);
+            InstanceMaintenance.EnsureStopped(GameDirectoryResolver.ResolveGameDirectory(_settingsStore.Load(),directory,current.Loader));
+            if(!repair && !current.Id.StartsWith("local:",StringComparison.Ordinal))throw new LaunchException("社区整合包请先导入为本地副本再修改版本，避免后续更新覆盖。");
+            if(MaintenanceValidateOverride!=null)await MaintenanceValidateOverride(game,loader,loaderVersion,ct);
+            else {
+                using var catalog=new VersionCatalogService();
+                var games=await catalog.GetMinecraftVersionsAsync(ct);
+                ct.ThrowIfCancellationRequested();
+                if(!games.Any(v=>v.Name==game))throw new LaunchException("Minecraft版本不存在或网络不可用。");
+                if(loader!="vanilla"){var loaders=await catalog.GetLoaderVersionsAsync(loader,game,ct);ct.ThrowIfCancellationRequested();if(!loaders.Any(v=>v.Version==loaderVersion))throw new LaunchException("加载器版本不兼容或网络不可用。");}
+            }
+            ct.ThrowIfCancellationRequested();
+            var next=System.Text.Json.JsonSerializer.Deserialize<InstanceMetadata>(System.Text.Json.JsonSerializer.Serialize(current))!;
+            next.Game=game;next.Loader=loader;next.LoaderVersion=loader=="vanilla"?"":loaderVersion;
+            await Task.Run(()=>InstanceMaintenance.QuarantineCorruptDependencies(game),ct);
+            string preparedVersion;
+            if(MaintenanceProvisionOverride!=null)preparedVersion=await MaintenanceProvisionOverride(directory,next,progress,ct);
+            else {
+                preparedVersion=(await PrepareCoreAsync(directory,next,progress,ct,true)).VersionName;
+                int remaining=await Task.Run(()=>InstanceMaintenance.QuarantineCorruptDependencies(preparedVersion),ct);
+                if(remaining>0)preparedVersion=(await PrepareCoreAsync(directory,next,progress,ct,true)).VersionName;
+            }
+            ct.ThrowIfCancellationRequested();
+            if(!repair)InstanceMaintenance.Commit(directory,next);
+            return preparedVersion;
+        }
+
         /// <summary>Reads instance.json from the recorded install path (fallback to the id) for an instance.</summary>
         private async Task<(string InstanceDir, InstanceMetadata Metadata)> ReadInstanceMetadataAsync(
             string instanceId,
@@ -119,7 +166,7 @@ namespace CMUmcl.Launch
             try
             {
                 metadata = System.Text.Json.JsonSerializer.Deserialize<InstanceMetadata>(
-                    await File.ReadAllTextAsync(instanceJsonPath, ct).ConfigureAwait(false))
+                    await Compat.ReadAllTextAsync(instanceJsonPath, ct).ConfigureAwait(false))
                     ?? throw new LaunchException("实例信息无效，请重新安装该整合包。");
             }
             catch (System.Text.Json.JsonException)
@@ -138,6 +185,7 @@ namespace CMUmcl.Launch
             IProgress<LaunchProgress>? progress,
             CancellationToken ct)
         {
+            InstanceMaintenance.EnsureStopped(instanceDir);
             // Validate/refresh the session before launching.
             session = await EnsureValidSessionAsync(session, progress, ct).ConfigureAwait(false);
 
@@ -151,8 +199,9 @@ namespace CMUmcl.Launch
             var mSession = new MSession(session.SelectedProfileName, session.AccessToken, session.SelectedProfileId);
 
             // Build MLaunchOption.
-            string gameDir = ResolveGameDirectory(prepared.Settings, instanceDir, prepared.Loader);
+            string gameDir = GameDirectoryResolver.ResolveGameDirectory(prepared.Settings, instanceDir, prepared.Loader);
             Directory.CreateDirectory(gameDir);
+            InstanceMaintenance.EnsureStopped(gameDir);
 
             var option = new MLaunchOption
             {
@@ -172,6 +221,8 @@ namespace CMUmcl.Launch
             option.ExtraJvmArguments = MLaunchOption.DefaultExtraJvmArguments
                 .Append(new MArgument($"-javaagent:{authlibJar}={YggdrasilClient.ApiRoot}"));
 
+            InstanceOptionsStore.ApplyLaunchOptions(option, prepared.Settings);
+
             // Quick play only when the server is not a local/loopback placeholder.
             string serverAddress = metadata.ServerAddress ?? string.Empty;
             if (!string.IsNullOrWhiteSpace(serverAddress)
@@ -186,13 +237,17 @@ namespace CMUmcl.Launch
             progress?.Report(new LaunchProgress { Stage = "启动", Message = "正在构建启动进程…" });
             Process process = await prepared.Launcher.BuildProcessAsync(prepared.VersionName, option, ct).ConfigureAwait(false);
 
-            process.Start();
+            GameProcessDiagnostics diagnostics = GameProcessDiagnostics.Prepare(process);
+            var sharing=await Task.Run(()=>InstanceSharing.Begin(gameDir,InstanceOptionsStore.Load(instanceDir).SharedSettings),ct);
+            try { ct.ThrowIfCancellationRequested();process.Start();InstanceMaintenance.RecordRunning(instanceDir,process);InstanceMaintenance.RecordRunning(gameDir,process);sharing?.Attach(process); }
+            catch { try{if(!process.HasExited)process.Kill();}catch{ } sharing?.Dispose();throw; }
+            diagnostics.BeginRead();
 
             // Wait for the actual game window (owned by the same Java process) before
             // claiming the game has started. Java may take a while to boot the LWJGL window.
-            progress?.Report(new LaunchProgress { Stage = "启动中", Message = "游戏进程已启动，正在等待游戏窗口…" });
+            progress?.Report(new LaunchProgress { Stage = "启动中", Message = "游戏进程已启动，正在等待游戏窗口。" });
 
-            bool windowDetected = await GameWindowWaiter.WaitForWindowAsync(process, ct).ConfigureAwait(false);
+            bool windowDetected=await WaitForOwnedGameAsync(process,ct,diagnostics.Describe).ConfigureAwait(false);
 
             if (windowDetected)
             {
@@ -212,6 +267,17 @@ namespace CMUmcl.Launch
             };
         }
 
+        internal static async Task<bool> WaitForOwnedGameAsync(Process process,CancellationToken ct,Func<string>? diagnostics=null)
+        {
+            try { var visible=await GameWindowWaiter.WaitForWindowAsync(process,ct,diagnostics).ConfigureAwait(false);ct.ThrowIfCancellationRequested();return visible; }
+            catch
+            {
+                try { if(!process.HasExited){process.Kill();if(!process.WaitForExit(5000))throw new LaunchException("游戏进程尚未退出，请检查后重试。");} }
+                catch(System.ComponentModel.Win32Exception){throw new LaunchException("无法结束本次启动的游戏进程，请手动退出游戏。");}
+                throw;
+            }
+        }
+
         /// <summary>
         /// Shared install path: load settings, then either reuse an already-provisioned base/loader
         /// install (skipping downloads) or install vanilla + select Java + install the loader once.
@@ -221,7 +287,7 @@ namespace CMUmcl.Launch
             string instanceDir,
             InstanceMetadata metadata,
             IProgress<LaunchProgress>? progress,
-            CancellationToken ct)
+            CancellationToken ct, bool forceRepair = false)
         {
             string gameVersion = metadata.Game ?? string.Empty;
             string loader = metadata.Loader ?? string.Empty;
@@ -230,7 +296,7 @@ namespace CMUmcl.Launch
             if (string.IsNullOrWhiteSpace(gameVersion))
                 throw new LaunchException("实例缺少 Minecraft 版本信息。");
 
-            AppSettings settings = _settingsStore.Load();
+            AppSettings settings = InstanceOptionsStore.Resolve(_settingsStore.Load(), InstanceOptionsStore.Load(instanceDir));
 
             // Build shared Minecraft path + launcher.
             var minecraftPath = new MinecraftPath(LauncherPaths.MinecraftDirectory);
@@ -239,7 +305,7 @@ namespace CMUmcl.Launch
             string signature = ProvisioningMarker.ComputeSignature(gameVersion, loader, loaderVersion);
 
             // Reuse an existing install only when the marker matches and the version files are present.
-            if (ProvisioningMarker.TryReadReady(
+            if (!forceRepair && ProvisioningMarker.TryReadReady(
                     instanceDir, LauncherPaths.MinecraftDirectory, signature, out string readyVersionName))
             {
                 progress?.Report(new LaunchProgress { Stage = "准备", Message = "游戏文件已就绪，跳过下载。" });
@@ -367,11 +433,26 @@ namespace CMUmcl.Launch
                 case "fabric":
                 {
                     progress?.Report(new LaunchProgress { Stage = "安装 Fabric", Message = "正在安装 Fabric…" });
-                    var fabric = new FabricInstaller(_http);
-                    if (string.IsNullOrWhiteSpace(loaderVersion))
-                        versionName = await fabric.Install(gameVersion, launcher.MinecraftPath).ConfigureAwait(false);
-                    else
-                        versionName = await fabric.Install(gameVersion, loaderVersion, launcher.MinecraftPath).ConfigureAwait(false);
+                    using var fabricHttp = new HttpClient(CMUmcl.Network.LauncherProxy.CreateHandler())
+                    {
+                        Timeout = TimeSpan.FromSeconds(45)
+                    };
+                    var fabric = new FabricInstaller(fabricHttp);
+                    try
+                    {
+                        if (string.IsNullOrWhiteSpace(loaderVersion))
+                            versionName = await fabric.Install(gameVersion, launcher.MinecraftPath).ConfigureAwait(false);
+                        else
+                            versionName = await fabric.Install(gameVersion, loaderVersion, launcher.MinecraftPath).ConfigureAwait(false);
+                    }
+                    catch (TaskCanceledException) when (!ct.IsCancellationRequested)
+                    {
+                        throw new LaunchException("Fabric 版本服务器响应超时，请检查网络后重试。");
+                    }
+                    catch (HttpRequestException)
+                    {
+                        throw new LaunchException("Fabric 版本服务器网络错误，请检查网络后重试。");
+                    }
 
                     progress?.Report(new LaunchProgress { Stage = "安装 Fabric", Message = $"正在下载 Fabric 依赖（{versionName}）…" });
                     await launcher.InstallAsync(
@@ -452,32 +533,6 @@ namespace CMUmcl.Launch
             public string Loader = string.Empty;
         }
 
-        /// <summary>
-        /// Determines the game directory for an instance according to the version-isolation
-        /// setting. "Modded" means the loader is neither empty nor vanilla.
-        /// </summary>
-        private static string ResolveGameDirectory(AppSettings settings, string instanceDir, string loader)
-        {
-            switch (settings.VersionIsolation)
-            {
-                case VersionIsolation.All:
-                    return instanceDir;
-
-                case VersionIsolation.ModdedOnly:
-                    return IsModdedLoader(loader) ? instanceDir : LauncherPaths.GameDirectory;
-
-                case VersionIsolation.Off:
-                default:
-                    return LauncherPaths.GameDirectory;
-            }
-        }
-
-        private static bool IsModdedLoader(string? loader)
-        {
-            string normalized = (loader ?? string.Empty).Trim().ToLowerInvariant();
-            return normalized is not ("" or "vanilla");
-        }
-
         private async Task<AuthSession> EnsureValidSessionAsync(
             AuthSession session,
             IProgress<LaunchProgress>? progress,
@@ -549,8 +604,8 @@ namespace CMUmcl.Launch
         {
             try
             {
-                byte[] hash = SHA256.HashData(File.ReadAllBytes(path));
-                string actual = Convert.ToHexString(hash);
+                byte[] hash = Compat.Sha256(File.ReadAllBytes(path));
+                string actual = Compat.Hex(hash);
                 return string.Equals(actual, expectedHex, StringComparison.OrdinalIgnoreCase);
             }
             catch

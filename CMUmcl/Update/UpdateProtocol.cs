@@ -12,7 +12,7 @@ public sealed record UpdateRelease(int FormatVersion, string Platform, string Ve
 
 public static class UpdateProtocol
 {
-    public const string FeedUrl = "https://csumcl.mcapcs.cn/update/windows-x86_64/latest.json";
+    public const string FeedUrl = "https://csumcl.mcapcs.cn/update/windows-x86_64/net48/latest.json";
     public const long MaxArchiveSize = 1024L * 1024 * 1024;
     public const long DiskReserve = 64L * 1024 * 1024;
     public const string PublicKey = """
@@ -27,7 +27,7 @@ public static class UpdateProtocol
     public static Version ParseVersion(string value)
     {
         if (string.IsNullOrWhiteSpace(value) || value.Split('.').Length is < 3 or > 4 ||
-            value.Any(c => !char.IsAsciiDigit(c) && c != '.') || !Version.TryParse(value, out var version))
+            value.Any(c => !Compat.IsAsciiDigit(c) && c != '.') || !Version.TryParse(value, out var version))
             throw new InvalidDataException("更新版本号必须为三段或四段数字。测试版本不进入正式更新通道。");
         return new Version(version.Major, version.Minor, Math.Max(0, version.Build), Math.Max(0, version.Revision));
     }
@@ -47,7 +47,7 @@ public static class UpdateProtocol
             throw new InvalidDataException("不支持的更新格式或平台。");
         _ = ParseVersion(release.Version);
         if (release.Size <= 0 || release.Size > MaxArchiveSize || release.Sha256?.Length != 64 ||
-            !release.Sha256.All(char.IsAsciiHexDigit)) throw new InvalidDataException("更新大小或哈希无效。");
+            !release.Sha256.All(Compat.IsAsciiHexDigit)) throw new InvalidDataException("更新大小或哈希无效。");
         ValidateUrl(new Uri(release.Url, UriKind.Absolute));
         ValidateSignature(release.ArchiveSignature);
         return release;
@@ -58,7 +58,7 @@ public static class UpdateProtocol
         if (uri.Scheme != "https" || !uri.IsDefaultPort ||
             !uri.Host.Equals("csumcl.mcapcs.cn", StringComparison.OrdinalIgnoreCase) ||
             uri.UserInfo.Length != 0 || uri.Fragment.Length != 0 || uri.Query.Length != 0 ||
-            !uri.AbsolutePath.StartsWith("/update/windows-x86_64/", StringComparison.Ordinal) ||
+            !uri.AbsolutePath.StartsWith("/update/windows-x86_64/net48/", StringComparison.Ordinal) ||
             !uri.AbsolutePath.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
             throw new InvalidDataException("更新包必须来自指定 CDN 的 HTTPS ZIP 地址。");
     }
@@ -73,12 +73,11 @@ public static class UpdateProtocol
     private static void Verify(byte[] data, UpdateSignature signature, string publicKey, bool isHash)
     {
         ValidateSignature(signature);
-        using var key = ECDsa.Create();
-        key.ImportFromPem(publicKey);
+        using var key = Compat.CreateEcdsa(publicKey);
         var sig = Convert.FromBase64String(signature.Value);
         bool valid = isHash
-            ? key.VerifyHash(data, sig, DSASignatureFormat.IeeeP1363FixedFieldConcatenation)
-            : key.VerifyData(data, sig, HashAlgorithmName.SHA256, DSASignatureFormat.IeeeP1363FixedFieldConcatenation);
+            ? key.VerifyHash(data, sig)
+            : key.VerifyData(data, sig, HashAlgorithmName.SHA256);
         if (!valid) throw new CryptographicException("更新签名校验失败。");
     }
 
@@ -86,14 +85,14 @@ public static class UpdateProtocol
     {
         using var stream = File.OpenRead(path);
         if (stream.Length != release.Size) throw new InvalidDataException("更新包大小不匹配。");
-        var hash = SHA256.HashData(stream);
-        if (!Convert.ToHexString(hash).Equals(release.Sha256, StringComparison.OrdinalIgnoreCase))
+        var hash = Compat.Sha256(stream);
+        if (!Compat.Hex(hash).Equals(release.Sha256, StringComparison.OrdinalIgnoreCase))
             throw new CryptographicException("更新包 SHA-256 校验失败。");
         Verify(hash, release.ArchiveSignature, publicKey, isHash: true);
     }
 
     public static string InstallLockName(string directory) => "Local\\CMUmcl.Install." +
-        Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(
+        Compat.Hex(Compat.Sha256(System.Text.Encoding.UTF8.GetBytes(
             Path.GetFullPath(directory).TrimEnd(Path.DirectorySeparatorChar).ToUpperInvariant())));
 
     public static void EnsureFreeSpace(string directory, long requiredBytes)
@@ -128,7 +127,7 @@ public static class UpdateProtocol
             if (!directory) files.Add(name);
         }
         if (!files.Contains("CMUmcl.exe", StringComparer.OrdinalIgnoreCase) ||
-            !files.Contains("CMUmcl.dll", StringComparer.OrdinalIgnoreCase) ||
+
             !files.Contains("updater/CMUmcl.Updater.exe", StringComparer.OrdinalIgnoreCase))
             throw new InvalidDataException("更新包缺少客户端或独立更新程序，必须使用根目录为程序文件的完整发布 ZIP。");
         EnsureFreeSpace(destination, expanded);
@@ -151,7 +150,7 @@ public static class UpdateProtocol
              (stem[3] is >= '0' and <= '9' or '¹' or '²' or '³'));
     }
 
-    private static bool IsUserData(string name) => new[] { "CMUmclData", "instances", "minecraft", "cache",
+    private static bool IsUserData(string name) => new[] { "sandbox-data", "CMUmclData", "instances", "minecraft", "cache",
         "java", "auth.dat", "settings.json", "installed.json", "keys", "admin.env", "admin-credentials.txt",
         ".git", ".update-backups" }.Contains(name, StringComparer.OrdinalIgnoreCase);
 }

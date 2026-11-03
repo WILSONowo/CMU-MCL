@@ -147,7 +147,7 @@ namespace CMUmcl.Content
                 string markerPath = GetPath(instanceDir);
                 string tempPath = markerPath + ".tmp";
                 File.WriteAllText(tempPath, json);
-                File.Move(tempPath, markerPath, overwrite: true);
+                Compat.Move(tempPath, markerPath, overwrite: true);
                 return true;
             }
             catch

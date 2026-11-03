@@ -23,12 +23,15 @@ namespace CMUmcl
 
         protected override void OnStartup(StartupEventArgs e)
         {
+            AppDomain.CurrentDomain.UnhandledException += (_, ev) => { if(ev.ExceptionObject is Exception ex) System.IO.File.WriteAllText(System.IO.Path.Combine(AppContext.BaseDirectory, "sandbox-error.log"), ex.GetType().FullName + "\n" + ex.StackTrace); };
             base.OnStartup(e);
+            CMUmcl.Appearance.DpiWindowBehavior.Initialize();
+            LauncherPaths.RootOverride = System.IO.Path.Combine(AppContext.BaseDirectory, "sandbox-data");
 
             // Use a separate, explicit data root for portable runs and isolated acceptance tests.
             if (e.Args.Length != 0)
             {
-                if (e.Args.Length != 2 || e.Args[0] != "--data-directory" || !System.IO.Path.IsPathFullyQualified(e.Args[1]))
+                if (e.Args.Length != 2 || e.Args[0] != "--data-directory" || !Compat.IsPathFullyQualified(e.Args[1]))
                 {
                     MessageBox.Show("数据目录参数无效。用法：--data-directory <绝对路径>", "CMUmcl");
                     Shutdown();
@@ -50,9 +53,9 @@ namespace CMUmcl
             // Load settings and ensure the on-disk layout exists before any service runs.
             _settingsStore = new SettingsStore();
             _settingsStore.Load();
-            Network.LauncherProxy.Initialize();
-            Appearance.AppearanceManager.Initialize(SettingsStore.Current);
+            CMUmcl.Network.LauncherProxy.Initialize();
             LauncherPaths.EnsureDirectories();
+            CMUmcl.Appearance.AppearanceManager.Initialize(SettingsStore.Current);
 
             _client = new YggdrasilClient();
             _store = new AuthStore();
@@ -140,7 +143,7 @@ namespace CMUmcl
         /// <summary>Shows the login window and returns the resulting session, or null if cancelled.</summary>
         private AuthSession? ShowLogin()
         {
-            var login = new LoginWindow(_client!, _store!);
+            var login = new LoginWindow(_client!, _store!) { Title = "CMUmcl — NET48 0.3.1 本地测试 r18登录" };
             bool? ok = login.ShowDialog();
             if (ok == true && login.ResultSession != null)
             {
@@ -155,6 +158,7 @@ namespace CMUmcl
             var main = new MainWindow(session, _store!, _manifestClient!, _installer!, _installedState!, _launchService!, _settingsStore!, _localInstanceService!);
             bool loggingOut = false;
 
+            main.Title = "CMUmcl — NET48 0.3.1 本地测试 r18";
             main.LogoutRequested += () => loggingOut = true;
 
             main.Closed += (_, _) =>
@@ -187,6 +191,7 @@ namespace CMUmcl
             _launchService?.Dispose();
             if (_ownsInstallGate) _installGate?.ReleaseMutex();
             _installGate?.Dispose();
+            CMUmcl.Network.LauncherProxy.Shutdown();
             base.OnExit(e);
         }
     }

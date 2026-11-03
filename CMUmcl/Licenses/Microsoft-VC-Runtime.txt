@@ -1,0 +1,8 @@
+Microsoft Visual C++ Runtime application-local redistributable
+
+vcruntime140.dll x64 is copied from the licensed Visual Studio 2022 Enterprise VC/Redist/MSVC/14.44.35112/x64/Microsoft.VC143.CRT directory, not from a Windows system directory.
+Redistribution is governed by the Microsoft Visual Studio 2022 license and its REDIST list.
+https://visualstudio.microsoft.com/license-terms/vs2022-ga-proenterprise/
+https://learn.microsoft.com/en-us/visualstudio/releases/2022/redistribution
+
+Used only to load the bundled WebP decoder; Windows 10/11 supplies UCRT.

@@ -17,7 +17,7 @@ internal static class Program
             var job = JsonSerializer.Deserialize<UpdateJob>(File.ReadAllBytes(Path.Combine(stage, "job.json")), UpdateProtocol.JsonOptions)
                 ?? throw new InvalidDataException("缺少更新任务。");
             var install = Path.GetFullPath(job.InstallDirectory);
-            if (job.DataDirectory is not null && !Path.IsPathFullyQualified(job.DataDirectory))
+            if (job.DataDirectory is not null && !Compat.IsPathFullyQualified(job.DataDirectory))
                 throw new InvalidDataException("重启数据目录必须为绝对路径。");
             if (stage.StartsWith(install.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
                 throw new InvalidDataException("暂存目录不能位于程序安装目录内。");
@@ -28,7 +28,7 @@ internal static class Program
             UpdateProtocol.VerifyArchive(archive, release);
             var extracted = Path.Combine(stage, "apply-" + Guid.NewGuid().ToString("N"));
             var files = UpdateProtocol.ExtractArchive(archive, extracted);
-            if (AssemblyName.GetAssemblyName(Path.Combine(extracted, "CMUmcl.dll")).Version != UpdateProtocol.ParseVersion(release.Version))
+            if (AssemblyName.GetAssemblyName(Path.Combine(extracted, "CMUmcl.exe")).Version != UpdateProtocol.ParseVersion(release.Version))
                 throw new InvalidDataException("包内版本与更新版本不符。");
 
             WaitForParent(job);
@@ -40,7 +40,7 @@ internal static class Program
             try
             {
                 // Reject stale jobs if another updater already changed the installation.
-                var current = AssemblyName.GetAssemblyName(Path.Combine(install, "CMUmcl.dll")).Version;
+                var current = AssemblyName.GetAssemblyName(Path.Combine(install, "CMUmcl.exe")).Version;
                 if (current != UpdateProtocol.ParseVersion(job.CurrentVersion))
                     throw new IOException("安装目录版本已变化，请重新打开客户端检查更新。");
                 var backups = Path.Combine(install, ".update-backups");
@@ -54,8 +54,8 @@ internal static class Program
             var restart = new ProcessStartInfo(Path.Combine(install, "CMUmcl.exe")) { UseShellExecute = true, WorkingDirectory = install };
             if (job.DataDirectory is not null)
             {
-                restart.ArgumentList.Add("--data-directory");
-                restart.ArgumentList.Add(job.DataDirectory);
+                Compat.AddArgument(restart, "--data-directory");
+                Compat.AddArgument(restart, job.DataDirectory);
             }
             Process.Start(restart);
             return 0;

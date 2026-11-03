@@ -54,11 +54,11 @@ public sealed class LauncherUpdateClient : IDisposable
             // Resume is only a transport optimization; the pinned signature and
             // archive/version checks remain mandatory before starting the updater.
             await Task.Run(() => UpdateProtocol.VerifyArchive(cachedArchive, release, _verificationKey), ct).ConfigureAwait(false);
-            File.Move(cachedArchive, Path.Combine(stage, "package.zip"));
-            await File.WriteAllBytesAsync(Path.Combine(stage, "latest.json"), envelope, ct).ConfigureAwait(false);
+            Compat.Move(cachedArchive, Path.Combine(stage, "package.zip"));
+            await Compat.WriteAllBytesAsync(Path.Combine(stage, "latest.json"), envelope, ct).ConfigureAwait(false);
             // Validate all archive entries before offering to close the launcher.
             await Task.Run(() => UpdateProtocol.ExtractArchive(Path.Combine(stage, "package.zip"), Path.Combine(stage, "preview")), ct).ConfigureAwait(false);
-            var payloadVersion = AssemblyName.GetAssemblyName(Path.Combine(stage, "preview", "CMUmcl.dll")).Version;
+            var payloadVersion = AssemblyName.GetAssemblyName(Path.Combine(stage, "preview", "CMUmcl.exe")).Version;
             if (payloadVersion != UpdateProtocol.ParseVersion(release.Version)) throw new InvalidDataException("包内版本与签名版本不符。");
             Directory.Delete(Path.Combine(stage, "preview"), recursive: true);
             return stage;
@@ -74,7 +74,7 @@ public sealed class LauncherUpdateClient : IDisposable
     public static void StartUpdater(string stage)
     {
         var install = AppContext.BaseDirectory;
-        if (!string.Equals(Path.GetFileName(Environment.ProcessPath), "CMUmcl.exe", StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(Path.GetFileName(Process.GetCurrentProcess().MainModule.FileName), "CMUmcl.exe", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("开发运行模式不能替换程序，请使用正式自包含客户端。");
         var updaterSource = Path.Combine(install, "updater");
         if (!File.Exists(Path.Combine(updaterSource, "CMUmcl.Updater.exe")))
@@ -85,7 +85,7 @@ public sealed class LauncherUpdateClient : IDisposable
         Directory.CreateDirectory(runner);
         foreach (var source in Directory.EnumerateFiles(updaterSource, "*", SearchOption.AllDirectories))
         {
-            var relative = Path.GetRelativePath(updaterSource, source);
+            var relative = Compat.GetRelativePath(updaterSource, source);
             UpdateTransaction.AssertSafeTarget(updaterSource, relative);
             var target = Path.Combine(runner, relative);
             Directory.CreateDirectory(Path.GetDirectoryName(target)!);
@@ -97,7 +97,7 @@ public sealed class LauncherUpdateClient : IDisposable
         File.WriteAllText(Path.Combine(stage, "job.json"), JsonSerializer.Serialize(job, UpdateProtocol.JsonOptions));
         var start = new ProcessStartInfo(Path.Combine(runner, "CMUmcl.Updater.exe")) { UseShellExecute = false,
             CreateNoWindow = true, WorkingDirectory = stage };
-        start.ArgumentList.Add(stage);
+        Compat.AddArgument(start, stage);
         _ = Process.Start(start) ?? throw new IOException("无法启动更新程序。");
     }
 
@@ -105,7 +105,7 @@ public sealed class LauncherUpdateClient : IDisposable
     {
         using var response = await _http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
-        await using var stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+        using var stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
         using var result = new MemoryStream();
         var buffer = new byte[8192];
         int count;

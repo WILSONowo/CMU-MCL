@@ -22,6 +22,10 @@ namespace CMUmcl.Content
     /// <summary>User-configurable launcher settings persisted to settings.json.</summary>
     public sealed class AppSettings
     {
+        public int WindowWidth { get; set; } = 854;
+        public int WindowHeight { get; set; } = 480;
+        public bool FullScreen { get; set; }
+        public string[] ExtraJvmArguments { get; set; } = Array.Empty<string>();
         [JsonPropertyName("proxyMode")]
         public LauncherProxyMode ProxyMode { get; set; }
         [JsonPropertyName("proxyHost")]

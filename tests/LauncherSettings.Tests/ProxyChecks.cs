@@ -47,17 +47,17 @@ internal static partial class Program
         var config=SettingsStore.CreateDefaults();
         using var timeout=new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var ct=timeout.Token;
-        var releaseStream=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseStream=new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         int httpRequests=0, originRequests=0, socksRequests=0, connects=0;
         string expectedAuth="Basic "+Convert.ToBase64String(Encoding.UTF8.GetBytes("fixture:secret"));
         bool leakedOriginAuth=false,socksAuthenticated=false;
-        await using var origin=new LocalProxyFixture(async stream=>
+        using var origin=new LocalProxyFixture(async stream=>
         {
             var header=await ReadHeader(stream,ct);Interlocked.Increment(ref originRequests);
             if(header.Contains("Proxy-Authorization",StringComparison.OrdinalIgnoreCase)) leakedOriginAuth=true;
             await Reply(stream,"origin",ct);
         });
-        await using var proxy=new LocalProxyFixture(async stream=>
+        using var proxy=new LocalProxyFixture(async stream=>
         {
             var header=await ReadHeader(stream,ct);Interlocked.Increment(ref httpRequests);
             if(!header.Contains("Proxy-Authorization: "+expectedAuth,StringComparison.OrdinalIgnoreCase))
@@ -72,11 +72,11 @@ internal static partial class Program
             if(header.Contains("/stream "))
             {
                 await stream.WriteAsync(Encoding.ASCII.GetBytes("HTTP/1.1 200 OK\r\nContent-Length: 6\r\nConnection: close\r\n\r\nabc"),ct);
-                await releaseStream.Task.WaitAsync(ct);await stream.WriteAsync("def"u8.ToArray(),ct);return;
+                await releaseStream.Task.WaitAsync(ct);await stream.WriteAsync(System.Text.Encoding.UTF8.GetBytes("def"),ct);return;
             }
             await Reply(stream,"proxy",ct);
         });
-        await using var socks=new LocalProxyFixture(async stream=>
+        using var socks=new LocalProxyFixture(async stream=>
         {
             byte[] greeting=new byte[2];await stream.ReadExactlyAsync(greeting,ct);
             byte[] methods=new byte[greeting[1]];await stream.ReadExactlyAsync(methods,ct);
@@ -109,7 +109,7 @@ internal static partial class Program
             using var held=await client.GetAsync("http://proxy-target.invalid/stream",HttpCompletionOption.ResponseHeadersRead,ct);
             config.ProxyMode=LauncherProxyMode.Direct;store.Save(config);
             Check(await client.GetStringAsync(origin.Url,ct)=="origin","same client switches back to direct for new requests");
-            releaseStream.TrySetResult();
+            releaseStream.TrySetResult(true);
             Check(await held.Content.ReadAsStringAsync(ct)=="abcdef","proxy switch preserves an in-flight streamed download");
             Check(!leakedOriginAuth && originRequests==2,"proxy credentials never sent to direct origin");
             config.ProxyMode=LauncherProxyMode.Http;store.Save(config);
@@ -126,7 +126,7 @@ internal static partial class Program
             bool invalidRejected=false;try{await client.GetStringAsync(origin.Url,ct);}catch(HttpRequestException){invalidRejected=true;}
             Check(invalidRejected && originRequests==2,"corrupt saved custom proxy never silently falls back to direct");
         }
-        finally {releaseStream.TrySetResult();store.Save(original);}
+        finally {releaseStream.TrySetResult(true);store.Save(original);}
     }
     private static async Task<string> ReadHeader(Stream stream,CancellationToken ct)
     {
@@ -134,13 +134,13 @@ internal static partial class Program
         while(bytes.Count<32768)
         {
             await stream.ReadExactlyAsync(b,ct);bytes.Add(b[0]);
-            if(bytes.Count>=4 && bytes[^4]==13 && bytes[^3]==10 && bytes[^2]==13 && bytes[^1]==10) return Encoding.ASCII.GetString(bytes.ToArray());
+            if(bytes.Count>=4 && bytes[bytes.Count-4]==13 && bytes[bytes.Count-3]==10 && bytes[bytes.Count-2]==13 && bytes[bytes.Count-1]==10) return Encoding.ASCII.GetString(bytes.ToArray());
         }
         throw new IOException("Header limit");
     }
     private static Task Reply(Stream stream,string body,CancellationToken ct) => stream.WriteAsync(Encoding.ASCII.GetBytes($"HTTP/1.1 200 OK\r\nContent-Length: {body.Length}\r\nConnection: close\r\n\r\n{body}"),ct).AsTask();
 }
-internal sealed class LocalProxyFixture : IAsyncDisposable
+internal sealed class LocalProxyFixture : IAsyncDisposable, IDisposable
 {
     private readonly TcpListener _listener=new(IPAddress.Loopback,0);
     private readonly CancellationTokenSource _stop=new();
@@ -157,6 +157,7 @@ internal sealed class LocalProxyFixture : IAsyncDisposable
             catch(OperationCanceledException){}
         });
     }
+    public void Dispose()=>Task.Run(async()=>await DisposeAsync()).GetAwaiter().GetResult();
     public async ValueTask DisposeAsync()
     {
         _stop.Cancel();_listener.Stop();await _loop;

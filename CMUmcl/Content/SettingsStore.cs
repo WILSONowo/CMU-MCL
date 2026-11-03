@@ -65,7 +65,7 @@ namespace CMUmcl.Content
                     // Atomic write: write to a temp file then move over the target.
                     string temp = LauncherPaths.SettingsPath + ".tmp";
                     File.WriteAllText(temp, json);
-                    File.Move(temp, LauncherPaths.SettingsPath, overwrite: true);
+                    Compat.Move(temp, LauncherPaths.SettingsPath, overwrite: true);
 
                     Current = settings;
                     return true;
@@ -88,7 +88,7 @@ namespace CMUmcl.Content
         /// <summary>Restores safe values after a load or before a save.</summary>
         public static void Sanitize(AppSettings settings)
         {
-            if (!Enum.IsDefined(settings.ProxyMode)) settings.ProxyMode = LauncherProxyMode.System;
+            if (!Enum.IsDefined(settings.ProxyMode.GetType(), settings.ProxyMode)) settings.ProxyMode = LauncherProxyMode.System;
             settings.ProxyHost = settings.ProxyHost?.Trim() ?? "";
             settings.ProxyUsername ??= "";
             settings.ProxyPasswordProtected ??= "";
@@ -102,13 +102,13 @@ namespace CMUmcl.Content
                 settings.VersionIsolation = VersionIsolation.ModdedOnly;
 
             settings.InstancesDirectory = LauncherPaths.NormalizeInstancesDirectory(settings.InstancesDirectory);
-            if (!Enum.IsDefined(settings.Theme)) settings.Theme = LauncherTheme.System;
-            if (!double.IsFinite(settings.BackgroundOpacity)) settings.BackgroundOpacity = 0.25;
-            settings.BackgroundOpacity = Math.Clamp(settings.BackgroundOpacity, 0.05, 1);
+            if (!Enum.IsDefined(settings.Theme.GetType(), settings.Theme)) settings.Theme = LauncherTheme.System;
+            if (!Compat.IsFinite(settings.BackgroundOpacity)) settings.BackgroundOpacity = 0.25;
+            settings.BackgroundOpacity = Compat.Clamp(settings.BackgroundOpacity, 0.05, 1);
             if (string.IsNullOrWhiteSpace(settings.BackgroundPath)) settings.BackgroundPath = null;
             else
             {
-                try { settings.BackgroundPath = Path.IsPathFullyQualified(settings.BackgroundPath)
+                try { settings.BackgroundPath = Compat.IsPathFullyQualified(settings.BackgroundPath)
                     ? Path.GetFullPath(settings.BackgroundPath) : null; }
                 catch { settings.BackgroundPath = null; }
             }
@@ -120,12 +120,12 @@ namespace CMUmcl.Content
                     settings.BackgroundImages.Add(new(settings.BackgroundPath, "背景图片"));
             }
             settings.BackgroundPath = null; // One-time migration of the previous single-image setting.
-            if (!Enum.IsDefined(settings.BackgroundMode.Value)) settings.BackgroundMode = BackgroundKind.Default;
-            settings.BackgroundImages = settings.BackgroundImages.Where(i => i != null && !string.IsNullOrWhiteSpace(i.Path) && Path.IsPathFullyQualified(i.Path))
+            if (!Enum.IsDefined(settings.BackgroundMode.Value.GetType(), settings.BackgroundMode.Value)) settings.BackgroundMode = BackgroundKind.Default;
+            settings.BackgroundImages = settings.BackgroundImages.Where(i => i != null && !string.IsNullOrWhiteSpace(i.Path) && Compat.IsPathFullyQualified(i.Path))
                 .DistinctBy(i => i.Path, StringComparer.OrdinalIgnoreCase).Take(50)
                 .Select(i => i with { Name = string.IsNullOrWhiteSpace(i.Name) ? "背景图片" : i.Name }).ToList();
             settings.BackgroundUrl = settings.BackgroundUrl?.Trim() ?? "";
-            settings.BackgroundIntervalSeconds = Math.Clamp(settings.BackgroundIntervalSeconds, 10, 3600);
+            settings.BackgroundIntervalSeconds = Compat.Clamp(settings.BackgroundIntervalSeconds, 10, 3600);
         }
     }
 }

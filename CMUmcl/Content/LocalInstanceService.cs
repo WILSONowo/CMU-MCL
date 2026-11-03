@@ -16,6 +16,9 @@ namespace CMUmcl.Content
     /// <summary>User input required to create a local (non-manifest) instance.</summary>
     public sealed class CreateLocalInstanceRequest
     {
+        /// <summary>Keep a draft out of installed lists until its files are prepared.</summary>
+        public bool DeferRegistration { get; set; }
+
         /// <summary>User-facing instance name.</summary>
         public string DisplayName { get; set; } = string.Empty;
 
@@ -110,7 +113,7 @@ namespace CMUmcl.Content
                 throw new LocalInstanceException("无法写入实例信息文件：" + ex.Message, ex);
             }
 
-            _installedState.RecordInstall(id, 1, folder, displayName);
+            if (!request.DeferRegistration) _installedState.RecordInstall(id, 1, folder, displayName);
 
             return new LocalInstanceResult
             {
@@ -119,6 +122,24 @@ namespace CMUmcl.Content
                 DisplayName = displayName,
                 InstanceDirectory = instanceDir,
             };
+        }
+
+        internal (string Folder,string DisplayName) PreviewName(string name)
+        {
+            var folder=LocalInstanceNaming.SanitizeFolderName(name);
+            return LocalInstanceNaming.ResolveUniqueName(folder,name.Trim(),CollectTakenNames(LauncherPaths.InstancesDirectory));
+        }
+
+        public void RegisterPrepared(LocalInstanceResult result)
+        {
+            string directory = PackFileSystem.ResolveUnder(LauncherPaths.InstancesDirectory, PackFileSystem.SanitizeRelativePath(result.InstallPath));
+            if (!string.Equals(Path.GetFullPath(result.InstanceDirectory), directory, StringComparison.OrdinalIgnoreCase))
+                throw new LocalInstanceException("实例目录与创建记录不一致。");
+            var metadata = JsonSerializer.Deserialize<InstanceMetadata>(File.ReadAllText(Path.Combine(directory, "instance.json")));
+            if (metadata?.Id != result.Id) throw new LocalInstanceException("实例信息与创建记录不一致。");
+            _installedState.RecordInstall(result.Id, 1, result.InstallPath, result.DisplayName);
+            if (_installedState.GetInstalledRevision(result.Id) != 1)
+                throw new LocalInstanceException("实例已准备完成，但保存实例列表失败，请重试。");
         }
 
         // ------------------------------------------------------------------
@@ -158,7 +179,7 @@ namespace CMUmcl.Content
 
             try
             {
-                foreach (string dir in Directory.EnumerateDirectories(instancesRoot))
+                foreach (string dir in Directory.Exists(instancesRoot)?Directory.EnumerateDirectories(instancesRoot):Array.Empty<string>())
                     taken.Add(Path.GetFileName(dir));
             }
             catch

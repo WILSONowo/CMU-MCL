@@ -21,7 +21,7 @@ namespace CMUmcl.Content
         /// <summary>Lowercase hex of a hash byte array.</summary>
         public static string ComputeHex(byte[] hash)
         {
-            return Convert.ToHexString(hash).ToLowerInvariant();
+            return Compat.Hex(hash).ToLowerInvariant();
         }
 
         /// <summary>

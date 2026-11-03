@@ -17,6 +17,34 @@ internal static partial class Program
         var start=DateTime.UtcNow;
         while(!condition()) { if((DateTime.UtcNow-start).TotalMilliseconds>timeout) throw new Exception("Timed out waiting for UI state"); await Task.Delay(50); }
     }
+    private static void JavaSaveDiagnostic(MainWindow window, SettingsStore store, string fixture)
+    {
+        var candidate = JavaLocator.DetectExecutable(fixture);
+        var detected = (JavaInfo?)typeof(MainWindow).GetField("_detectedJava", BindingFlags.Instance|BindingFlags.NonPublic)!.GetValue(window);
+        var state = new {
+            process_64bit = Environment.Is64BitProcess,
+            os_64bit = Environment.Is64BitOperatingSystem,
+            reported_os_architecture = System.Runtime.InteropServices.RuntimeInformation.OSArchitecture.ToString(),
+            candidate_exists = candidate != null,
+            candidate_major = candidate?.Major,
+            candidate_architecture = candidate?.Architecture,
+            candidate_supported = candidate?.IsSupportedArchitecture,
+            manual_checked = Get<RadioButton>(window,"JavaManualRadio").IsChecked,
+            auto_checked = Get<RadioButton>(window,"JavaAutoRadio").IsChecked,
+            selected_candidate = Get<ComboBox>(window,"JavaCandidatesCombo").SelectedItem is JavaInfo,
+            field_matches_fixture = Get<TextBox>(window,"JavaPathTextBox").Text == fixture,
+            saved_matches_fixture = store.Load().JavaPath == fixture,
+            saved_canonical_matches_fixture = string.Equals(Path.GetFullPath(store.Load().JavaPath ?? "."), Path.GetFullPath(fixture), StringComparison.OrdinalIgnoreCase),
+            detected_major = detected?.Major,
+            detected_supported = detected?.IsSupportedArchitecture,
+            probe_generation = typeof(MainWindow).GetField("_javaProbeGeneration", BindingFlags.Instance|BindingFlags.NonPublic)!.GetValue(window),
+            loading_preferences = typeof(MainWindow).GetField("_loadingPreferences", BindingFlags.Instance|BindingFlags.NonPublic)!.GetValue(window),
+            scanning_java = typeof(MainWindow).GetField("_scanningJava", BindingFlags.Instance|BindingFlags.NonPublic)!.GetValue(window),
+            java_error_visible = Get<TextBlock>(window,"JavaErrorText").Visibility == Visibility.Visible,
+            preference_notice_visible = Get<Border>(window,"PreferenceNotice").IsVisible
+        };
+        File.WriteAllText(Path.Combine(_output,"java-save-diagnostic.json"),System.Text.Json.JsonSerializer.Serialize(state,new System.Text.Json.JsonSerializerOptions { WriteIndented=true }));
+    }
     private static Task CallAsync(object target,string method,params object[] args) => (Task)target.GetType().GetMethod(method,BindingFlags.Instance|BindingFlags.NonPublic)!.Invoke(target,args)!;
     private static async Task UiChecks(Application app,MainWindow window,SettingsStore store,InstalledStateStore installed,LaunchService launch,YggdrasilClient auth,AuthStore authStore,bool live)
     {
@@ -52,7 +80,8 @@ internal static partial class Program
         string java=CreateJavaFixture("chosen-java","21.0.5","x64");
         Get<ComboBox>(window,"JavaCandidatesCombo").ItemsSource=new[]{JavaLocator.DetectExecutable(java)!};
         Get<ComboBox>(window,"JavaCandidatesCombo").SelectedIndex=0;
-        await Until(()=>store.Load().JavaPath==java);
+        try { await Until(()=>store.Load().JavaPath==java); }
+        catch { JavaSaveDiagnostic(window, store, java); throw; }
         Check(Get<RadioButton>(window,"JavaManualRadio").IsChecked==true,"selected Java validates and saves automatically");
         Check(Descendants(Get<ComboBox>(window,"JavaCandidatesCombo")).OfType<TextBlock>().Any(t=>t.Text.Contains("21.0.5")),"Java selection shows version and architecture");
         Get<TextBox>(window,"JavaPathTextBox").Text=Path.Combine(_output,"nonexistent.exe");
@@ -72,7 +101,7 @@ internal static partial class Program
         await CallAsync(window,"AddBackgroundImagesAsync",new object[]{new[]{image,second}});
         await Until(()=>!AppearanceManager.BackgroundLoading);
         Check(store.Load().BackgroundImages.Count==2 && store.Load().BackgroundMode==BackgroundKind.Local,"local multiselection imports and saves both backgrounds");
-        File.Move(image,image+".moved",true);
+        Compat.Move(image,image+".moved",true);
         await AppearanceManager.NextBackgroundAsync();
         Check(AppearanceManager.HasBackground && AppearanceManager.BackgroundError==null,"owned images survive original file move");
         string? previous=AppearanceManager.CurrentBackgroundPath;
@@ -166,5 +195,78 @@ internal static partial class Program
         }
         plainLogin.Close();
         Check(!File.Exists(Path.Combine(LauncherPaths.RootDirectory,"auth.dat")),"fixture never creates real account data");
+    }
+
+    internal static void CommunityUiChecks(Window window)
+    {
+        // Navigate to the community page via the nav button.
+        Click(window, "CommunityNavButton");
+        var view = Get<UserControl>(window, "CommunityResourceView");
+        Check(view.Visibility == Visibility.Visible, "community: nav shows community view");
+
+        // The view must be bound to the community view model (internal type, InternalsVisibleTo).
+        Check(view.DataContext is CMUmcl.Community.CommunityResourceViewModel, "community: view bound to CommunityResourceViewModel");
+        var vm = (CMUmcl.Community.CommunityResourceViewModel)view.DataContext;
+
+        // Header chrome reflects the community page.
+        Check(Get<TextBlock>(window, "HeaderTitleText").Text == "社区资源", "community: header title is 社区资源");
+        Check(Get<Button>(window, "NewInstanceButton").Visibility == Visibility.Collapsed, "community: new-instance button collapsed");
+        Check(Get<Button>(window, "RefreshButton").Visibility == Visibility.Visible, "community: refresh button visible");
+
+        // First load shows the empty state without firing a search.
+        Check(vm.Results.Count > 0, "community: first entry automatically displays resources");
+        Check(!vm.IsLoading, "community: not loading on first load");
+        Check(!vm.HasEmptyMessage, "community: loaded resources hide empty message");
+        Check(string.IsNullOrEmpty(vm.EmptyMessage), "community: loaded resources clear empty text");
+        Check(!vm.HasDetail, "community: no detail on first load");
+        Check(vm.Detail == null, "community: detail null on first load");
+
+        // Target / option collections are populated with sane defaults.
+        Check(vm.TargetInstances != null, "community: target instances collection present");
+        Check(vm.LoaderOptions.Count >= 6, "community: at least six loader options");
+        Check(vm.SortOptions.Count >= 4, "community: at least four sort options");
+        Check(vm.SourceOptions.Count == 3 && vm.SourceOptions.Any(o => o.Value == CMUmcl.Community.ResourceSourceId.CurseForge), "community: local candidate exposes both sources");
+        Check(vm.OnlyCompatible, "community: only-compatible defaults on");
+        Check(vm.CanFilterCompatibility == (vm.SelectedTarget != null), "community: compatibility filter gated on selected target");
+
+        // Kind gates the loader filter (set the property directly; do not run SelectKindCommand).
+        Check(vm.Kind == CMUmcl.Community.ResourceKind.Mod && vm.ShowLoaderFilter, "community: Mod kind shows loader filter");
+        vm.Kind = CMUmcl.Community.ResourceKind.Modpack;
+        Check(!vm.ShowLoaderFilter, "community: Modpack kind hides loader filter");
+        vm.Kind = CMUmcl.Community.ResourceKind.Mod;
+        Check(vm.ShowLoaderFilter, "community: Mod kind restores loader filter");
+
+        // Switching pages retains the same view model instance (state retained).
+        Click(window, "PacksNavButton");
+        Check(view.Visibility == Visibility.Collapsed, "community: packs nav collapses community view");
+        Click(window, "CommunityNavButton");
+        Check(view.Visibility == Visibility.Visible, "community: nav back shows community view");
+        Check(ReferenceEquals(vm, view.DataContext), "community: page switch retains same view model");
+
+        // Theme / background toggling must not disturb the community page or its VM.
+        Click(window, "ThemeToggleButton");
+        Check(view.Visibility == Visibility.Visible && ReferenceEquals(vm, view.DataContext), "community: theme toggle keeps community view and VM");
+        Click(window, "ThemeToggleButton"); // restore original theme
+        Check(view.Visibility == Visibility.Visible && ReferenceEquals(vm, view.DataContext), "community: theme restore keeps community view and VM");
+
+        // Commands are wired.
+        Check(vm.SearchCommand != null && vm.SelectKindCommand != null && vm.OpenDetailCommand != null, "community: search/kind/detail commands bound");
+
+        // Navigating and toggling must not auto-fire a network search.
+        Check(vm.Results.Count > 0 && !vm.IsLoading, "community: navigation and theme changes preserve loaded resources");
+
+        // The page lays out with a measurable size.
+        window.UpdateLayout();
+        Check(view.ActualWidth > 0 && view.ActualHeight > 0, "community: view laid out with measurable size");
+
+        // Option value sanity.
+        Check(new[]{"fabric","forge","neoforge","quilt"}.All(l => vm.LoaderOptions.Any(o => o.Value == l)), "community: loader options include fabric/forge/neoforge/quilt");
+        Check(vm.SourceOptions.Any(o => o.Value == null)
+            && vm.SourceOptions.Any(o => o.Value == CMUmcl.Community.ResourceSourceId.Modrinth)
+            && vm.SourceOptions.Any(o => o.Value == CMUmcl.Community.ResourceSourceId.CurseForge), "community: source options include all/null/Modrinth/CurseForge");
+        Check(vm.SortOptions.Any(o => o.Value == CMUmcl.Community.ResourceSort.Recommended)
+            && vm.SortOptions.Any(o => o.Value == CMUmcl.Community.ResourceSort.Downloads)
+            && vm.SortOptions.Any(o => o.Value == CMUmcl.Community.ResourceSort.LastUpdated)
+            && vm.SortOptions.Any(o => o.Value == CMUmcl.Community.ResourceSort.Name), "community: sort options include Recommended/Downloads/LastUpdated/Name");
     }
 }

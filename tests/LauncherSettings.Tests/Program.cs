@@ -23,23 +23,48 @@ internal static partial class Program
 {
     private static int _checks;
     private static bool _profile;
+    private static bool _cancelOnly;
+    private static bool _feedbackOnly;
+    private static bool _nameIconOnly;
+    private static bool _installSyncOnly;
+    private static bool _instanceSettingsOnly;
+    private static bool _avatarOnly;
+    private static bool _liveCommunity;
+    private static bool _communityOnly;
+    private static bool _resourceRedesign;
+    private static bool _dependencyUi, _liveDependencies;
     private static string _output = "";
     private static void Check(bool condition, string name)
     {
-        if (!condition) throw new Exception("FAIL: " + name);
+        if (!condition) { if (_liveCommunity) Console.WriteLine("FAIL " + name); throw new Exception("FAIL: " + name); }
         Console.WriteLine("PASS " + name); _checks++;
     }
 
     [STAThread]
     private static int Main(string[] args)
     {
-        if (args.Length < 2 || !Path.IsPathFullyQualified(args[0]) || !Path.IsPathFullyQualified(args[1])) return 2;
-        string source = args[0]; _output = args[1];
+        if (args.Length < 2 || !Compat.IsPathFullyQualified(args[0]) || !Compat.IsPathFullyQualified(args[1])) return 2;
+        // Canonicalize harness paths before creating fixtures: JavaLocator returns
+        // canonical Windows paths, while callers may supply forward slashes.
+        string source = Path.GetFullPath(args[0]); _output = Path.GetFullPath(args[1]);
         Directory.CreateDirectory(_output);
         LauncherPaths.RootOverride = Path.Combine(_output, "isolated-data");
         bool preview = args.Contains("--preview");
+        _cancelOnly=args.Contains("--cancel-maintenance");
+        _feedbackOnly=args.Contains("--feedback-r14") || args.Contains("--feedback-r15");
+        _nameIconOnly=args.Contains("--name-icon");
+        _installSyncOnly=args.Contains("--install-sync");
+        _instanceSettingsOnly=args.Contains("--instance-settings");
+        _avatarOnly = args.Contains("--avatar-only");
+        _liveDependencies = args.Contains("--live-dependencies");
+        _dependencyUi = args.Contains("--dependency-ui");
+        _liveCommunity = args.Contains("--live-community") || _liveDependencies;
+        _communityOnly = args.Contains("--community-ui-only");
+        _resourceRedesign = args.Contains("--resource-redesign");
         _profile = args.Contains("--profile");
+        _dpiOnly = args.Contains("--dpi-matrix");
         var app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
+        DpiWindowBehavior.Initialize();
         XNamespace ns = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
         var document = XDocument.Load(Path.Combine(source, "CMUmcl", "App.xaml"));
         var dictionary = new XElement(document.Root!.Element(ns + "Application.Resources")!.Element(ns + "ResourceDictionary")!);
@@ -48,7 +73,7 @@ internal static partial class Program
         app.Startup += async (_, _) =>
         {
             try { await Run(app, preview, args.Contains("--live-background")); if (!preview) app.Shutdown(0); }
-            catch (Exception ex) { Console.Error.WriteLine(ex); File.WriteAllText(Path.Combine(_output, "failure.txt"), ex.ToString()); app.Shutdown(1); }
+            catch (Exception ex) { if (_liveCommunity) { Console.Error.WriteLine("LIVE_COMMUNITY_FAILED " + ex.GetType().Name); app.Shutdown(1); return; } Console.Error.WriteLine(ex.GetType().FullName+": "+ex.Message+"\n"+ex.StackTrace); File.WriteAllText(Path.Combine(_output, "failure.txt"), ex.GetType().FullName+": "+ex.Message+"\n"+ex.StackTrace); app.Shutdown(1); }
         };
         return app.Run();
     }
@@ -56,13 +81,13 @@ internal static partial class Program
     private static async Task Run(Application app, bool preview, bool liveBackground)
     {
         var store = new SettingsStore();
-        if (!preview && !_profile) CoreChecks(store);
+        if (!preview && !_profile && !_liveCommunity && !_communityOnly && !_resourceRedesign && !_dependencyUi) CoreChecks(store);
         if (_profile) PrepareProfile(store);
         var settings = store.Load();
         CMUmcl.Network.LauncherProxy.Initialize();
         if (preview && !File.Exists(LauncherPaths.SettingsPath)) { settings.Theme = LauncherTheme.Light; store.Save(settings); }
         AppearanceManager.Initialize(settings);
-        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        using var key = new ECDsaCng(256);
         var model = new ResourceManifest { FormatVersion = 1, Instances = [
             new() { Id="campus-survival", Name="示例整合包 1", Description="用于本地界面测试。", Revision=3,
                 Minecraft=new(){ GameVersion="1.21.1", Loader="fabric", LoaderVersion="0.16.10"},
@@ -74,15 +99,15 @@ internal static partial class Program
         byte[] manifest = JsonSerializer.SerializeToUtf8Bytes(model);
         byte[] signature = JsonSerializer.SerializeToUtf8Bytes(new { algorithm="ECDSA-P256-SHA256", signature=Convert.ToBase64String(key.SignData(manifest,HashAlgorithmName.SHA256)) });
         var handler = new FixtureHandler(manifest, signature);
-        var client = new ResourceManifestClient(handler, new Uri("https://preview.invalid/"), key.ExportSubjectPublicKeyInfoPem());
+        var client = new ResourceManifestClient(handler, new Uri("https://preview.invalid/"), Compat.ExportPem((ECDsaCng)key));
         var auth = new YggdrasilClient();
         var authStore = new AuthStore();
         var installed = new InstalledStateStore();
         var installer = new PackInstaller(installed);
         var launch = new LaunchService(auth, authStore, installed, store);
-        var updates = new LauncherUpdateClient(new HttpClient(new FixtureHandler([],[])), key.ExportSubjectPublicKeyInfoPem());
+        var updates = new LauncherUpdateClient(new HttpClient(new FixtureHandler([],[])), Compat.ExportPem((ECDsaCng)key));
         var window = new MainWindow(new AuthSession { SelectedProfileName="开发预览", SelectedProfileId=new string('0',32) },
-            authStore,client,installer,installed,launch,store,new LocalInstanceService(installed),updates);
+            authStore,client,installer,installed,launch,store,new LocalInstanceService(installed),updates, _liveCommunity ? null : CreateCommunityFixture(installed));
         window.Title = "CMUmcl — 设置与背景开发预览";
         if (!preview) { window.ShowInTaskbar=false; window.WindowStartupLocation=WindowStartupLocation.Manual; window.Left=-18000; window.Top=-18000; }
         window.Closed += (_,_) => { client.Dispose();auth.Dispose();installer.Dispose();launch.Dispose(); if(preview) app.Shutdown(); };
@@ -96,15 +121,30 @@ internal static partial class Program
         Get<Button>(window,"CheckLauncherUpdateButton").IsEnabled=false;
         Get<TextBlock>(window,"LauncherUpdateStatus").Text="本地开发预览，不连接线上更新服务。";
         Check(Get<ItemsControl>(window,"CardsList").Items.Count==2,"signed fixture manifest displays two pack cards");
+        if(Environment.GetCommandLineArgs().Contains("--local-mod-icons")){await LocalModIconChecks(Path.GetFullPath(Environment.GetCommandLineArgs()[1]));window.Close();return;}
+        if(Environment.GetCommandLineArgs().Contains("--folder-import")){await FolderImportChecks(installed);window.Close();return;}
+        if(Environment.GetCommandLineArgs().Contains("--instance-content")){await InstanceContentChecks(window,installed,store);window.Close();return;}
+        if (_feedbackOnly){await FeedbackR14Checks(window,installed,store,launch,Path.GetFullPath(Environment.GetCommandLineArgs()[1]));window.Close();return;}
+        if (_cancelOnly){await CancelMaintenanceChecks(window,launch);window.Close();return;}
+        if (_nameIconOnly){await NameIconChecks(window,installed,store);window.Close();return;}
+        if (_installSyncOnly) {await InstallSyncChecks(window,store,launch);window.Close();return;}
+        if (_instanceSettingsOnly) { await InstanceSettingsChecks(window,store);window.Close();return; }
+        if (_avatarOnly) { await AvatarChecks(window); window.Close(); return; }
+        if (_dependencyUi || _liveDependencies) { await DependencyUiChecks(window, installed, _liveDependencies); window.Close(); return; }
+        if (_resourceRedesign) { await NavigationResourceChecks(window, installed, launch); window.Close(); return; }
+        if (_communityOnly) { CommunityUiChecks(window); CommunityDetailBindingChecks(window, installed); File.WriteAllText(Path.Combine(_output,"result.txt"), $"PASS {_checks} community UI checks"); window.Close(); return; }
+        if (_liveCommunity) { await LiveCommunityChecks(window, store, installed); window.Close(); return; }
         if (preview) return;
+        if (_dpiOnly) { await DpiChecks(window,store,auth,authStore);window.Close();return; }
         if (_profile) { await Profile(window, store); window.Close(); return; }
 
         await ProxyChecks(store);
         await UiChecks(app, window, store, installed, launch, auth, authStore, liveBackground);
+        CommunityUiChecks(window);
         string savedJson=File.ReadAllText(LauncherPaths.SettingsPath);
         var reloaded = new MainWindow(new AuthSession { SelectedProfileName="开发预览", SelectedProfileId=new string('0',32) },
             authStore,client,installer,installed,launch,new SettingsStore(),new LocalInstanceService(installed),
-            new LauncherUpdateClient(new HttpClient(new FixtureHandler([],[])),key.ExportSubjectPublicKeyInfoPem()));
+            new LauncherUpdateClient(new HttpClient(new FixtureHandler([],[])),Compat.ExportPem((ECDsaCng)key)), CreateCommunityFixture(installed));
         Check(File.ReadAllText(LauncherPaths.SettingsPath)==savedJson && Get<ComboBox>(reloaded,"ThemeCombo").SelectedIndex==(int)LauncherTheme.Dark
             && Get<TextBox>(reloaded,"MemoryTextBox").Text=="3072" && Get<CheckBox>(reloaded,"AutoUpdatePacksCheck").IsChecked==false,
             "new window restores saved settings without writing during initialization");
@@ -126,7 +166,7 @@ internal static partial class Program
         Directory.CreateDirectory(LauncherPaths.RootDirectory);
         File.WriteAllText(LauncherPaths.SettingsPath,"{\"maxMemoryMb\":6144,\"javaPath\":null}");
         Check(!store.Load().AutoMemory && store.Load().MaxMemoryMb==6144,"legacy settings preserve manual heap");
-        File.Move(LauncherPaths.SettingsPath,LauncherPaths.SettingsPath+".legacy",true);
+        Compat.Move(LauncherPaths.SettingsPath,LauncherPaths.SettingsPath+".legacy",true);
         Check(store.Load().AutoMemory && SettingsStore.Current.AutoMemory,"fresh settings enable automatic memory and update Current");
         Check(MemoryAllocation.Recommend(new(8192,6144))==4096,"8 GB machine reserves system memory");
         Check(MemoryAllocation.Recommend(new(32768,24576))==8192,"automatic heap capped at 8 GB");
@@ -155,6 +195,7 @@ internal static partial class Program
         var invalid=new AppSettings{Theme=(LauncherTheme)99,BackgroundOpacity=double.NaN,BackgroundPath="relative.jpg"};SettingsStore.Sanitize(invalid);
         Check(invalid.Theme==LauncherTheme.System && invalid.BackgroundOpacity==0.25 && invalid.BackgroundPath==null,"invalid appearance preferences sanitized");
         Check(store.Save(SettingsStore.CreateDefaults()),"save fresh isolated defaults");
+        GameDiagnosticsChecks();
     }
     private static string CreateJavaFixture(string name,string version,string arch)
     {
