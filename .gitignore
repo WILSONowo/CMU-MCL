@@ -1,6 +1,7 @@
 # Source-only .NET Framework 4.8 branch.
 /*
 !/.gitignore
+!/.gitattributes
 !/README.md
 !/LICENSE
 !/NOTICE

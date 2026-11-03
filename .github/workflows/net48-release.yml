@@ -222,7 +222,10 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw 'ZIP upload failed' }
             & scp @sshArgs $env:KEYED_FEED "${target}:$feedUpload"
             if ($LASTEXITCODE -ne 0) { throw 'Feed upload failed' }
-            & scp @sshArgs 'scripts/deploy-net48-feed.sh' "${target}:$deployScript"
+            $deployLocal = Join-Path $env:RUNNER_TEMP 'deploy-net48-feed.sh'
+            $deployText = [IO.File]::ReadAllText('scripts/deploy-net48-feed.sh')
+            [IO.File]::WriteAllText($deployLocal, $deployText.Replace("`r`n", "`n"), [Text.UTF8Encoding]::new($false))
+            & scp @sshArgs $deployLocal "${target}:$deployScript"
             if ($LASTEXITCODE -ne 0) { throw 'Deploy script upload failed' }
             & ssh @sshArgs $target "bash $deployScript $env:VERSION $fileName $zipHash $feedUpload $feedHash"
             if ($LASTEXITCODE -ne 0) { throw 'Server deploy failed' }
@@ -241,3 +244,4 @@ jobs:
           Remove-Item -LiteralPath (Join-Path $env:RUNNER_TEMP 'deploy_key') -Force -ErrorAction SilentlyContinue
           Remove-Item -LiteralPath (Join-Path $env:RUNNER_TEMP 'known_hosts') -Force -ErrorAction SilentlyContinue
           Remove-Item -LiteralPath (Join-Path $env:RUNNER_TEMP 'update-signing-key.pem') -Force -ErrorAction SilentlyContinue
+          Remove-Item -LiteralPath (Join-Path $env:RUNNER_TEMP 'deploy-net48-feed.sh') -Force -ErrorAction SilentlyContinue
