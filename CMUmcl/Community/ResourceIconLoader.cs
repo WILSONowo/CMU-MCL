@@ -22,6 +22,7 @@ namespace CMUmcl.Community
         {
             var set = new HashSet<string>(CommunityHosts.ModrinthCdn, StringComparer.OrdinalIgnoreCase);
             set.UnionWith(CommunityHosts.CurseForgeCdn);
+            set.UnionWith(CommunityHosts.ResourceCdn);
             return set;
         }
 

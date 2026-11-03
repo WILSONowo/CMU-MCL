@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
+using System.Windows.Media.Imaging;
 using CMUmcl.Content;
 
 namespace CMUmcl
@@ -35,6 +36,25 @@ namespace CMUmcl
 
         public ManifestInstance Instance => _instance;
         public string InstanceId => _instance.Id;
+
+        /// <summary>Optional signed-manifest icon; loaded asynchronously by the window.</summary>
+        public string? IconUrl => string.IsNullOrWhiteSpace(_instance.IconUrl) ? null : _instance.IconUrl;
+
+        /// <summary>Whether the server marks this pack as required.</summary>
+        public bool IsRequired => _instance.Required;
+
+        private BitmapSource? _iconSource;
+        public BitmapSource? IconSource => _iconSource;
+        public bool HasIcon => _iconSource is not null;
+
+        /// <summary>Applies an asynchronously loaded icon, or keeps the built-in fallback.</summary>
+        public void SetIcon(BitmapSource? icon)
+        {
+            if (ReferenceEquals(_iconSource, icon)) return;
+            _iconSource = icon;
+            OnPropertyChanged(nameof(IconSource));
+            OnPropertyChanged(nameof(HasIcon));
+        }
 
         private string _name = string.Empty;
         public string Name

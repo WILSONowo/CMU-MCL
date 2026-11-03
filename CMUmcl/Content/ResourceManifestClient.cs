@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Security.Cryptography;
@@ -20,6 +21,7 @@ namespace CMUmcl.Content
         private const string LegacyAllowedPackHost = "103.24.216.15";
         private const string UserAgent = "CMUmcl/0.1.0";
         private const string SignatureAlgorithm = "ECDSA-P256-SHA256";
+        private const long MaximumPackSize = 8L * 1024 * 1024 * 1024;
 
         // Embedded manifest-signing public key (SPKI PEM). Out-of-band; never fetched.
         private const string PublicKeyPem =
@@ -125,16 +127,80 @@ namespace CMUmcl.Content
                 throw new ResourceException("清单内容格式无效。", ex);
             }
 
-            // Allowlist: every pack URL must be absolute HTTPS on the allowed host.
-            foreach (var instance in manifest.Instances)
+            ValidateManifest(manifest);
+            return manifest;
+        }
+
+        /// <summary>
+        /// Validates the signed manifest's structure before any card or download uses it.
+        /// A malformed signed manifest is a publisher error; fail closed instead of
+        /// rendering unusable entries or accepting a partially trusted download target.
+        /// </summary>
+        private static void ValidateManifest(ResourceManifest manifest)
+        {
+            if (manifest.FormatVersion != 1)
+                throw new ResourceException($"不支持的资源清单格式版本：{manifest.FormatVersion}。");
+
+            var ids = new HashSet<string>(StringComparer.Ordinal);
+            foreach (ManifestInstance instance in manifest.Instances)
             {
-                if (!IsAllowedPackUrl(instance.Pack.Url))
-                {
+                if (instance is null || string.IsNullOrWhiteSpace(instance.Id) || instance.Id.Length > 64)
+                    throw new ResourceException("资源清单包含无效的实例 ID，已拒绝加载。");
+                if (!ids.Add(instance.Id))
+                    throw new ResourceException($"资源清单包含重复的实例 ID：{instance.Id}，已拒绝加载。");
+                if (string.IsNullOrWhiteSpace(instance.Name))
+                    throw new ResourceException($"资源清单实例 {instance.Id} 缺少名称，已拒绝加载。");
+                if (instance.Revision < 0)
+                    throw new ResourceException($"资源清单实例 {instance.Id} 的修订号无效，已拒绝加载。");
+                if (instance.Server is not null && (instance.Server.Port < 0 || instance.Server.Port > 65535))
+                    throw new ResourceException($"资源清单实例 {instance.Id} 的服务器端口无效，已拒绝加载。");
+
+                ManifestPack? pack = instance.Pack;
+                if (pack is null || !string.Equals(pack.Kind, "mrpack", StringComparison.OrdinalIgnoreCase))
+                    throw new ResourceException($"资源清单实例 {instance.Id} 的整合包类型不受支持，已拒绝加载。");
+                if (!IsAllowedResourceUrl(pack.Url))
                     throw new ResourceException($"整合包下载地址不被允许，已拒绝加载（实例：{instance.Id}）。");
+                if (pack.Size <= 0 || pack.Size > MaximumPackSize)
+                    throw new ResourceException($"资源清单实例 {instance.Id} 的整合包大小无效，已拒绝加载。");
+
+                bool hasHash = false;
+                hasHash |= ValidateHash(pack.Sha1, 40, instance.Id, "SHA-1");
+                hasHash |= ValidateHash(pack.Sha256, 64, instance.Id, "SHA-256");
+                hasHash |= ValidateHash(pack.Sha512, 128, instance.Id, "SHA-512");
+                if (!hasHash)
+                    throw new ResourceException($"资源清单实例 {instance.Id} 的整合包缺少校验哈希，已拒绝加载。");
+
+                bool hasFilesUrl = !string.IsNullOrWhiteSpace(pack.FilesUrl);
+                bool hasFilesHash = !string.IsNullOrWhiteSpace(pack.FilesSha256);
+                if (hasFilesUrl != hasFilesHash)
+                    throw new ResourceException($"资源清单实例 {instance.Id} 的增量索引字段不完整，已拒绝加载。");
+                if (hasFilesUrl)
+                {
+                    if (!IsAllowedResourceUrl(pack.FilesUrl))
+                        throw new ResourceException($"增量索引地址不被允许，已拒绝加载（实例：{instance.Id}）。");
+                    if (!IsHex(pack.FilesSha256!, 64))
+                        throw new ResourceException($"资源清单实例 {instance.Id} 的增量索引哈希无效，已拒绝加载。");
                 }
             }
+        }
 
-            return manifest;
+        private static bool ValidateHash(string? value, int length, string instanceId, string name)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return false;
+            if (!IsHex(value, length))
+                throw new ResourceException($"资源清单实例 {instanceId} 的 {name} 校验值无效，已拒绝加载。");
+            return true;
+        }
+
+        private static bool IsHex(string value, int length)
+        {
+            if (value.Length != length)
+                return false;
+            foreach (char c in value)
+                if (!Compat.IsAsciiHexDigit(c))
+                    return false;
+            return true;
         }
 
         private async Task<byte[]> GetBytesAsync(string path, bool refresh, CancellationToken ct)
@@ -161,13 +227,19 @@ namespace CMUmcl.Content
             }
         }
 
-        private static bool IsAllowedPackUrl(string url)
+        /// <summary>
+        /// Absolute HTTPS URL on the resource host. Used for pack artifacts and the
+        /// incremental index; per-file Modrinth download URLs keep their own HTTPS rule.
+        /// </summary>
+        public static bool IsAllowedResourceUrl(string? url)
         {
             if (string.IsNullOrWhiteSpace(url))
                 return false;
             if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
                 return false;
             if (!string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+                return false;
+            if (uri.UserInfo.Length != 0 || uri.Fragment.Length != 0)
                 return false;
             return string.Equals(uri.Host, AllowedPackHost, StringComparison.OrdinalIgnoreCase)
                 || string.Equals(uri.Host, LegacyAllowedPackHost, StringComparison.OrdinalIgnoreCase);

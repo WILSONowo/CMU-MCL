@@ -13,6 +13,7 @@ public sealed record UpdateRelease(int FormatVersion, string Platform, string Ve
 public static class UpdateProtocol
 {
     public const string FeedUrl = "https://csumcl.mcapcs.cn/update/windows-x86_64/net48/latest.json";
+    public const string LegacyFeedUrl = "https://csumcl.mcapcs.cn/update/windows-x86_64/latest.json";
     public const long MaxArchiveSize = 1024L * 1024 * 1024;
     public const long DiskReserve = 64L * 1024 * 1024;
     public const string PublicKey = """
@@ -55,12 +56,23 @@ public static class UpdateProtocol
 
     public static void ValidateUrl(Uri uri)
     {
+        const string updateRoot = "/update/windows-x86_64/";
         if (uri.Scheme != "https" || !uri.IsDefaultPort ||
             !uri.Host.Equals("csumcl.mcapcs.cn", StringComparison.OrdinalIgnoreCase) ||
             uri.UserInfo.Length != 0 || uri.Fragment.Length != 0 || uri.Query.Length != 0 ||
-            !uri.AbsolutePath.StartsWith("/update/windows-x86_64/net48/", StringComparison.Ordinal) ||
+            !uri.AbsolutePath.StartsWith(updateRoot, StringComparison.Ordinal) ||
             !uri.AbsolutePath.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
             throw new InvalidDataException("更新包必须来自指定 CDN 的 HTTPS ZIP 地址。");
+
+        // New clients use the independent net48 channel. During a transition the
+        // deployed server may still publish the legacy flat layout; accept only
+        // those two shapes, not arbitrary subdirectories.
+        string relative = uri.AbsolutePath.Substring(updateRoot.Length);
+        bool net48 = relative.StartsWith("net48/", StringComparison.Ordinal) &&
+                     relative.IndexOf('/', "net48/".Length) < 0;
+        bool legacy = relative.IndexOf('/') < 0;
+        if (!net48 && !legacy)
+            throw new InvalidDataException("更新包路径必须位于 net48 通道或兼容的旧版目录。");
     }
 
     private static void ValidateSignature(UpdateSignature signature)

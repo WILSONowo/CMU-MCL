@@ -16,6 +16,10 @@ namespace CMUmcl.Community
         public static readonly HashSet<string> CurseForgeCdn = new(StringComparer.OrdinalIgnoreCase)
         { "mediafilez.forgecdn.net", "edge.forgecdn.net", "media.forgecdn.net" };
 
+        /// <summary>Own resource-site hosts used by server-pack icon_url and icons/&lt;sha256&gt; assets.</summary>
+        public static readonly HashSet<string> ResourceCdn = new(StringComparer.OrdinalIgnoreCase)
+        { CMUmcl.Content.ResourceManifestClient.AllowedPackHost, "103.24.216.15" };
+
         public static readonly HashSet<string> ProjectLinks = new(StringComparer.OrdinalIgnoreCase)
         { "modrinth.com", "www.curseforge.com", "legacy.curseforge.com" };
 

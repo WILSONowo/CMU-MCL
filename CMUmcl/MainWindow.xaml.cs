@@ -7,6 +7,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Media.Imaging;
 using CMUmcl.Auth;
 using CMUmcl.Content;
 using CMUmcl.Launch;
@@ -36,9 +37,12 @@ namespace CMUmcl
         private readonly LauncherUpdateClient _launcherUpdates;
         private readonly CancellationTokenSource _updateLifetime = new();
         private readonly Community.CommunityResourceViewModel _community;
+        private readonly Community.ResourceIconLoader _packIcons = new();
+        internal Func<string, Task<BitmapSource?>>? LoadPackIconOverride { get; set; }
         private CancellationTokenSource? _updateDownload;
         private (UpdateRelease Release, byte[] Envelope)? _availableUpdate;
         private bool _checkingLauncherUpdate;
+        private string? _promptedLauncherUpdateVersion;
         private bool _updatingLauncher;
         private bool _windowClosed;
         private int _activeOperations;
@@ -119,6 +123,7 @@ namespace CMUmcl
                 Appearance.AppearanceManager.BackgroundChanged -= UpdateBackgroundStatus;
                 _updateLifetime.Cancel();
                 _launcherUpdates.Dispose();
+                _packIcons.Dispose();
             };
             ShowPacksView();
         }
@@ -126,33 +131,41 @@ namespace CMUmcl
         private async void Window_Loaded(object sender, RoutedEventArgs e)
         {
             _ = LoadAccountAvatarAsync();
-            _ = CheckLauncherUpdateAsync();
+            _ = CheckLauncherUpdateAsync(false);
             await LoadManifestAsync();
         }
 
-        private async void CheckLauncherUpdate_Click(object sender, RoutedEventArgs e) => await CheckLauncherUpdateAsync();
+        private async void CheckLauncherUpdate_Click(object sender, RoutedEventArgs e) => await CheckLauncherUpdateAsync(true);
 
-        private async Task CheckLauncherUpdateAsync()
+        private async Task CheckLauncherUpdateAsync(bool userInitiated)
         {
             if (_checkingLauncherUpdate || _updatingLauncher) return;
             _checkingLauncherUpdate = true;
             CheckLauncherUpdateButton.IsEnabled = false;
             InstallLauncherUpdateButton.IsEnabled = false;
-            LauncherUpdateStatus.Text = "正在检查客户端更新…";
+            LauncherUpdateStatus.Text = "\u6B63\u5728\u68C0\u67E5\u5BA2\u6237\u7AEF\u66F4\u65B0...";
             try
             {
                 _availableUpdate = await _launcherUpdates.CheckAsync(_updateLifetime.Token);
                 if (_windowClosed) return;
                 LauncherUpdateStatus.Text = _availableUpdate is { } available
-                    ? $"发现新版本 {available.Release.Version}。{available.Release.Notes}"
-                    : $"当前版本 {LauncherUpdateClient.CurrentVersion.ToString(3)} 已是最新。";
+                    ? "\u53D1\u73B0\u65B0\u7248\u672C " + available.Release.Version + "\u3002" + available.Release.Notes
+                    : "\u5F53\u524D\u7248\u672C " + LauncherUpdateClient.CurrentVersion.ToString(3) + " \u5DF2\u662F\u6700\u65B0\u3002";
                 InstallLauncherUpdateButton.IsEnabled = _availableUpdate != null;
+                if (_availableUpdate is { } update &&
+                    (userInitiated || _promptedLauncherUpdateVersion != update.Release.Version) &&
+                    !_windowClosed && IsVisible && _inlinePrompt is null &&
+                    CreateInstanceView.Visibility != Visibility.Visible)
+                {
+                    _promptedLauncherUpdateVersion = update.Release.Version;
+                    await PromptForLauncherUpdateAsync(update);
+                }
             }
             catch (OperationCanceledException) when (_updateLifetime.IsCancellationRequested) { }
             catch (Exception ex)
             {
                 _availableUpdate = null;
-                if (!_windowClosed) LauncherUpdateStatus.Text = "暂时无法检查客户端更新：" + ex.Message;
+                if (!_windowClosed) LauncherUpdateStatus.Text = "\u6682\u65F6\u65E0\u6CD5\u68C0\u67E5\u5BA2\u6237\u7AEF\u66F4\u65B0\uFF1A" + ex.Message;
             }
             finally
             {
@@ -161,14 +174,33 @@ namespace CMUmcl
             }
         }
 
+        private async Task PromptForLauncherUpdateAsync((UpdateRelease Release, byte[] Envelope) update)
+        {
+            if (_windowClosed) return;
+            var choice = await ShowInlinePromptAsync(
+                "\u53D1\u73B0\u5BA2\u6237\u7AEF\u66F4\u65B0",
+                "\u65B0\u7248\u672C " + update.Release.Version + " \u5DF2\u53D1\u5E03\u3002\u662F\u5426\u73B0\u5728\u4E0B\u8F7D\u5E76\u5B89\u88C5\uFF1F\r\n\r\n" + update.Release.Notes,
+                "\u4E0B\u8F7D\u5E76\u5B89\u88C5");
+            if (_windowClosed) return;
+            if (choice == InlineChoice.Continue)
+                await InstallLauncherUpdateAsync();
+            else
+                LauncherUpdateStatus.Text = "\u53D1\u73B0\u65B0\u7248\u672C " + update.Release.Version + "\uFF0C\u53EF\u5728\u8BBE\u7F6E\u4E2D\u66F4\u65B0\u3002";
+        }
         private void CancelLauncherUpdate_Click(object sender, RoutedEventArgs e) => _updateDownload?.Cancel();
 
         private async void InstallLauncherUpdate_Click(object sender, RoutedEventArgs e)
         {
-            if (_updatingLauncher || _checkingLauncherUpdate || _availableUpdate is not { } available) return;
+            if (_checkingLauncherUpdate || _updatingLauncher) return;
+            await InstallLauncherUpdateAsync();
+        }
+
+        private async Task InstallLauncherUpdateAsync()
+        {
+            if (_updatingLauncher || _availableUpdate is not { } available) return;
             if (_activeOperations != 0 || _migrating || CreateInstanceView.HasActiveOperation)
             {
-                LauncherUpdateStatus.Text = "请等待当前下载、启动或迁移完成后再更新客户端。";
+                LauncherUpdateStatus.Text = "\u8BF7\u7B49\u5F85\u5F53\u524D\u4E0B\u8F7D\u3001\u542F\u52A8\u6216\u8FC1\u79FB\u5B8C\u6210\u540E\u518D\u66F4\u65B0\u5BA2\u6237\u7AEF\u3002";
                 return;
             }
             _updatingLauncher = true;
@@ -183,27 +215,31 @@ namespace CMUmcl
                 {
                     if (_windowClosed) return;
                     LauncherUpdateProgress.Value = value;
-                    LauncherUpdateStatus.Text = $"正在下载客户端 {available.Release.Version}：{value:F1}%";
+                    LauncherUpdateStatus.Text = "\u6B63\u5728\u4E0B\u8F7D\u5BA2\u6237\u7AEF " + available.Release.Version + "\uFF1A" + value.ToString("F1") + "%";
                 });
                 var stage = await _launcherUpdates.StageAsync(available.Release, available.Envelope, progress, _updateDownload.Token);
                 _updateDownload.Token.ThrowIfCancellationRequested();
                 if (_windowClosed) return;
-                LauncherUpdateStatus.Text = "下载与校验完成，准备安装。";
-                if (LauncherPrompt.Show(this, $"已下载并验证 {available.Release.Version}。现在关闭客户端、安装更新并重新打开？",
-                    "客户端更新", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
+                LauncherUpdateStatus.Text = "\u4E0B\u8F7D\u4E0E\u6821\u9A8C\u5B8C\u6210\uFF0C\u51C6\u5907\u5B89\u88C5...";
+                var choice = await ShowInlinePromptAsync(
+                    "\u5B89\u88C5\u5BA2\u6237\u7AEF\u66F4\u65B0",
+                    "\u5DF2\u4E0B\u8F7D\u5E76\u9A8C\u8BC1 " + available.Release.Version + "\u3002\u73B0\u5728\u5173\u95ED\u5BA2\u6237\u7AEF\u3001\u5B89\u88C5\u66F4\u65B0\u5E76\u91CD\u65B0\u6253\u5F00\uFF1F",
+                    "\u7ACB\u5373\u5B89\u88C5");
+                if (_windowClosed) return;
+                if (choice == InlineChoice.Continue)
                 {
                     LauncherUpdateClient.StartUpdater(stage);
                     Application.Current.Shutdown();
                 }
-                else LauncherUpdateStatus.Text = "已取消安装；客户端保持当前版本。";
+                else LauncherUpdateStatus.Text = "\u5DF2\u53D6\u6D88\u5B89\u88C5\uFF1B\u5BA2\u6237\u7AEF\u4FDD\u6301\u5F53\u524D\u7248\u672C\u3002";
             }
             catch (OperationCanceledException)
             {
-                if (!_windowClosed) LauncherUpdateStatus.Text = "已取消客户端更新。";
+                if (!_windowClosed) LauncherUpdateStatus.Text = "\u5DF2\u53D6\u6D88\u5BA2\u6237\u7AEF\u66F4\u65B0\u3002";
             }
             catch (Exception ex)
             {
-                if (!_windowClosed) LauncherUpdateStatus.Text = "客户端更新失败：" + ex.Message;
+                if (!_windowClosed) LauncherUpdateStatus.Text = "\u5BA2\u6237\u7AEF\u66F4\u65B0\u5931\u8D25\uFF1A" + ex.Message;
             }
             finally
             {
@@ -219,7 +255,6 @@ namespace CMUmcl
                 }
             }
         }
-
         // ------------------------------------------------------------------
         // Drag-and-drop (.mrpack import)
         // ------------------------------------------------------------------
@@ -500,7 +535,9 @@ namespace CMUmcl
                 {
                     int? installedRevision = _installedState.GetInstalledRevision(instance.Id);
                     string? displayName = _installedState.GetDisplayName(instance.Id);
-                    _cards.Add(new PackCardViewModel(instance, installedRevision, displayName));
+                    var card = new PackCardViewModel(instance, installedRevision, displayName);
+                    _cards.Add(card);
+                    _ = LoadPackIconAsync(card);
                 }
 
                 ShowCards();
@@ -518,6 +555,21 @@ namespace CMUmcl
                 _loading = false;
                 RefreshButton.IsEnabled = true;
             }
+        }
+
+        private async Task LoadPackIconAsync(PackCardViewModel card)
+        {
+            if (_windowClosed || string.IsNullOrWhiteSpace(card.IconUrl)) return;
+            try
+            {
+                BitmapSource? icon = LoadPackIconOverride is { } load
+                    ? await load(card.IconUrl!)
+                    : await _packIcons.LoadAsync(card.IconUrl, _updateLifetime.Token);
+                if (_windowClosed || !_cards.Contains(card)) return;
+                card.SetIcon(icon);
+            }
+            catch (OperationCanceledException) { }
+            catch { /* Offline/blocked icon keeps the built-in fallback. */ }
         }
 
         private async void InstallButton_Click(object sender, RoutedEventArgs e)

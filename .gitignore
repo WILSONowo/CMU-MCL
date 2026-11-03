@@ -10,6 +10,12 @@
 !/CMUmcl/
 !/CMUmcl.Updater/
 !/tests/
+!/.github/
+!/.github/workflows/
+!/.github/workflows/*.yml
+!/scripts/
+!/scripts/*.ps1
+!/scripts/*.sh
 !/docs/
 **/bin/
 **/obj/

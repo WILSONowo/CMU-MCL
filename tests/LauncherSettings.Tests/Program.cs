@@ -89,7 +89,7 @@ internal static partial class Program
         AppearanceManager.Initialize(settings);
         using var key = new ECDsaCng(256);
         var model = new ResourceManifest { FormatVersion = 1, Instances = [
-            new() { Id="campus-survival", Name="示例整合包 1", Description="用于本地界面测试。", Revision=3,
+            new() { Id="campus-survival", Required=true, IconUrl=ResourceManifestClient.BaseUrl+"/icons/"+new string('a',64)+".png", Name="示例整合包 1", Description="用于本地界面测试。", Revision=3,
                 Minecraft=new(){ GameVersion="1.21.1", Loader="fabric", LoaderVersion="0.16.10"},
                 Pack=new(){ Kind="mrpack", Url=ResourceManifestClient.BaseUrl+"/packs/campus.mrpack", Size=264241152, Sha256=new string('0',64)}, Server=new(){Address="preview.invalid",Port=25565}},
             new() { Id="creative", Name="示例整合包 2", Description="用于本地界面测试。", Revision=2,
@@ -108,6 +108,8 @@ internal static partial class Program
         var updates = new LauncherUpdateClient(new HttpClient(new FixtureHandler([],[])), Compat.ExportPem((ECDsaCng)key));
         var window = new MainWindow(new AuthSession { SelectedProfileName="开发预览", SelectedProfileId=new string('0',32) },
             authStore,client,installer,installed,launch,store,new LocalInstanceService(installed),updates, _liveCommunity ? null : CreateCommunityFixture(installed));
+        var packIconBitmap=System.Windows.Media.Imaging.BitmapSource.Create(2,2,96,96,PixelFormats.Bgra32,null,new byte[]{40,160,60,255,20,120,40,255,20,120,40,255,40,160,60,255},8);packIconBitmap.Freeze();
+        window.LoadPackIconOverride=_=>Task.FromResult<System.Windows.Media.Imaging.BitmapSource?>(packIconBitmap);
         window.Title = "CMUmcl — 设置与背景开发预览";
         if (!preview) { window.ShowInTaskbar=false; window.WindowStartupLocation=WindowStartupLocation.Manual; window.Left=-18000; window.Top=-18000; }
         window.Closed += (_,_) => { client.Dispose();auth.Dispose();installer.Dispose();launch.Dispose(); if(preview) app.Shutdown(); };
@@ -121,6 +123,12 @@ internal static partial class Program
         Get<Button>(window,"CheckLauncherUpdateButton").IsEnabled=false;
         Get<TextBlock>(window,"LauncherUpdateStatus").Text="本地开发预览，不连接线上更新服务。";
         Check(Get<ItemsControl>(window,"CardsList").Items.Count==2,"signed fixture manifest displays two pack cards");
+        await Task.Delay(100);window.UpdateLayout();
+        var fixtureCards=Get<ItemsControl>(window,"CardsList").Items.OfType<PackCardViewModel>().ToArray();
+        Check(fixtureCards.Any(c=>ReferenceEquals(c.IconSource,packIconBitmap)&&c.HasIcon),"server pack icon_url loads into the card");
+        Check(fixtureCards.Any(c=>c.IsRequired),"server required flag is exposed by the card view model");
+        Check(Descendants(Get<ItemsControl>(window,"CardsList")).OfType<TextBlock>().Any(x=>x.Text=="\u5FC5\u9700"),"required chip is rendered in the pack card");
+        await LauncherUpdatePopupChecks(window);
         if(Environment.GetCommandLineArgs().Contains("--local-mod-icons")){await LocalModIconChecks(Path.GetFullPath(Environment.GetCommandLineArgs()[1]));window.Close();return;}
         if(Environment.GetCommandLineArgs().Contains("--folder-import")){await FolderImportChecks(installed);window.Close();return;}
         if(Environment.GetCommandLineArgs().Contains("--instance-content")){await InstanceContentChecks(window,installed,store);window.Close();return;}

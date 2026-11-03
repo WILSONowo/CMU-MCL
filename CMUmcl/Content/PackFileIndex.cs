@@ -100,8 +100,11 @@ namespace CMUmcl.Content
                 && string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase);
         }
 
-        /// <summary>Absolute HTTPS URLs only (the files_url in the manifest).</summary>
-        public static bool IsAllowedFilesUrl(string? url) => IsAllowedDownloadUrl(url);
+        /// <summary>
+        /// The files_url in the manifest must stay on the signed resource host; a
+        /// signed manifest should not be able to redirect the index to another host.
+        /// </summary>
+        public static bool IsAllowedFilesUrl(string? url) => ResourceManifestClient.IsAllowedResourceUrl(url);
 
         /// <summary>Parses index bytes into a <see cref="PackFileIndex"/>; false on malformed input.</summary>
         public static bool TryParse(byte[] json, out PackFileIndex? index, out string? error)

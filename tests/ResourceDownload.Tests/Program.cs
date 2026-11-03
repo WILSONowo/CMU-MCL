@@ -51,7 +51,11 @@ using (var client = new ResourceManifestClient(handler, new Uri("https://cdn.exa
     try { await client.GetManifestAsync(); } catch (ResourceException) { rejected = true; }
     Check(rejected, "HTTP errors remain user-facing ResourceException");
 }
+Check(CMUmcl.Community.CommunityHosts.ResourceCdn.Contains("csumcl.mcapcs.cn") &&
+      CMUmcl.Community.CommunityHosts.TryGetHttpsHost("https://csumcl.mcapcs.cn/icons/" + new string('a', 64) + ".png", out var iconHost) &&
+      iconHost == "csumcl.mcapcs.cn", "server pack icon host is allowlisted for HTTPS loading");
 await ResumeTests.Run(Check);
+await UpdateFeedTests.Run(Check);
 await UpdateStageTests.Run(Check);
 if(args.Length!=0) throw new ArgumentException("No backend operations in this isolated suite");
 Console.WriteLine($"{passed} resource download checks passed.");

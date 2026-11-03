@@ -28,7 +28,13 @@ public sealed class LauncherUpdateClient : IDisposable
         if (!Environment.Is64BitProcess) throw new InvalidOperationException("自动更新仅支持 Windows x64 客户端。");
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeout.CancelAfter(TimeSpan.FromSeconds(20));
-        var bytes = await DownloadBytesAsync(UpdateProtocol.FeedUrl, 128 * 1024, timeout.Token).ConfigureAwait(false);
+        // Prefer the independent net48 channel. Fall back to the legacy flat
+        // feed only when that path is absent, so a partially migrated CDN still
+        // works without accepting arbitrary update URLs.
+        byte[]? bytes = await TryDownloadBytesAsync(UpdateProtocol.FeedUrl, 128 * 1024, timeout.Token).ConfigureAwait(false);
+        bytes ??= await TryDownloadBytesAsync(UpdateProtocol.LegacyFeedUrl, 128 * 1024, timeout.Token).ConfigureAwait(false);
+        if (bytes is null)
+            throw new InvalidDataException("更新服务尚未提供可用的 net48 或兼容更新清单。");
         var release = UpdateProtocol.ReadRelease(bytes, _verificationKey);
         return UpdateProtocol.ParseVersion(release.Version) > CurrentVersion ? (release, bytes) : null;
     }
@@ -101,9 +107,11 @@ public sealed class LauncherUpdateClient : IDisposable
         _ = Process.Start(start) ?? throw new IOException("无法启动更新程序。");
     }
 
-    private async Task<byte[]> DownloadBytesAsync(string url, int max, CancellationToken ct)
+    private async Task<byte[]?> TryDownloadBytesAsync(string url, int max, CancellationToken ct)
     {
         using var response = await _http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
+        if (response.StatusCode == HttpStatusCode.NotFound)
+            return null;
         response.EnsureSuccessStatusCode();
         using var stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
         using var result = new MemoryStream();

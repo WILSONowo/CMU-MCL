@@ -1,0 +1,243 @@
+name: net48 release
+
+# Public GitHub release: no-key client ZIP only.
+# Optional server publish: keyed ZIP + signed net48 feed.
+#
+# Required repository secrets for the optional server publish:
+#   CURSEFORGE_PROJECT_KEY  CurseForge project key (never printed)
+#   UPDATE_SIGNING_KEY_PEM  ECDSA P-256 PKCS#8 update signing key
+#   DEPLOY_SSH_KEY          SSH private key allowed to write the feed directory
+#   DEPLOY_KNOWN_HOSTS      pinned SSH host key line(s)
+# Optional:
+#   DEPLOY_HOST             defaults to 103.24.216.15
+#   DEPLOY_USER             defaults to root
+#
+# Never add pull_request to this workflow: secrets must not be exposed to PRs.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version (three or four numeric parts, e.g. 0.3.48.9)'
+        required: true
+        type: string
+      publish_server:
+        description: 'Build the keyed package and publish the server net48 feed'
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: net48-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  github-release:
+    runs-on: windows-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    env:
+      DOTNET_NOLOGO: '1'
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Resolve version
+        id: version
+        shell: pwsh
+        run: |
+          $tag = '${{ github.ref_name }}'
+          $version = '${{ inputs.version }}'
+          if ([string]::IsNullOrWhiteSpace($version)) {
+            if ($tag -notmatch '^v(.+)$') { throw 'Tag must start with v.' }
+            $version = $Matches[1]
+          }
+          if ($version -notmatch '^\d+\.\d+\.\d+(\.\d+)?$') {
+            throw 'Version must contain three or four numeric parts.'
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "tag=v$version" >> $env:GITHUB_OUTPUT
+          "VERSION=$version" >> $env:GITHUB_ENV
+
+      - name: Console regression tests
+        shell: pwsh
+        run: |
+          dotnet build tests/ResourceDownload.Tests/ResourceDownload.Tests.csproj -c Release --nologo
+          if ($LASTEXITCODE -ne 0) { throw 'ResourceDownload build failed' }
+          & tests/ResourceDownload.Tests/bin/Release/net48/CMUmcl.ResourceDownload.Tests.exe
+          if ($LASTEXITCODE -ne 0) { throw 'ResourceDownload tests failed' }
+          dotnet build tests/Bottom.Tests/Bottom.Tests.csproj -c Release --nologo
+          if ($LASTEXITCODE -ne 0) { throw 'Bottom build failed' }
+          & tests/Bottom.Tests/bin/Release/net48/CMUmcl.LauncherSettings.Tests.exe
+          if ($LASTEXITCODE -ne 0) { throw 'Bottom tests failed' }
+
+      - name: Build public (no-key) client
+        shell: pwsh
+        run: |
+          dotnet build CMUmcl/CMUmcl.csproj -c Release -p:Version=$env:VERSION --nologo
+          if ($LASTEXITCODE -ne 0) { throw 'Client build failed' }
+          dotnet build CMUmcl.Updater/CMUmcl.Updater.csproj -c Release -p:Version=$env:VERSION --nologo
+          if ($LASTEXITCODE -ne 0) { throw 'Updater build failed' }
+
+      - name: Package public (no-key) client
+        id: package
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP 'public-package'
+          $zip = & ./scripts/package-net48-release.ps1 -Version $env:VERSION `
+            -MainOutput 'CMUmcl/bin/Release/net48' `
+            -UpdaterOutput 'CMUmcl.Updater/bin/Release/net48' `
+            -OutputDirectory $out
+          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($zip)) { throw 'Packaging failed' }
+          "zip=$zip" >> $env:GITHUB_OUTPUT
+          "PUBLIC_ZIP=$zip" >> $env:GITHUB_ENV
+          "PUBLIC_ZIP_NAME=$([IO.Path]::GetFileName($zip))" >> $env:GITHUB_ENV
+
+      - name: Create GitHub release (public no-key ZIP)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: "CMUmcl ${{ steps.version.outputs.version }}"
+          files: |
+            ${{ steps.package.outputs.zip }}
+            ${{ runner.temp }}/public-package/release-info.json
+          generate_release_notes: true
+
+  server-release:
+    runs-on: windows-latest
+    needs: github-release
+    if: ${{ github.event_name == 'push' || inputs.publish_server == true }}
+    env:
+      DOTNET_NOLOGO: '1'
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      VERSION: ${{ needs.github-release.outputs.version }}
+      CURSEFORGE_PROJECT_KEY: ${{ secrets.CURSEFORGE_PROJECT_KEY }}
+      UPDATE_SIGNING_KEY_PEM: ${{ secrets.UPDATE_SIGNING_KEY_PEM }}
+      DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+      DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST || '103.24.216.15' }}
+      DEPLOY_USER: ${{ secrets.DEPLOY_USER || 'root' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Check server publish secrets
+        id: check
+        shell: pwsh
+        run: |
+          $missing = @()
+          foreach ($name in @('CURSEFORGE_PROJECT_KEY', 'UPDATE_SIGNING_KEY_PEM', 'DEPLOY_SSH_KEY', 'DEPLOY_KNOWN_HOSTS')) {
+            if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) { $missing += $name }
+          }
+          $ok = $missing.Count -eq 0
+          "ok=$($ok.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+          if (-not $ok) { Write-Host "Server publish skipped; missing secrets: $($missing -join ', ')" }
+
+      - name: Build and package keyed client
+        if: steps.check.outputs.ok == 'true'
+        shell: pwsh
+        run: |
+          $privateRoot = Join-Path $env:RUNNER_TEMP 'private-build'
+          $keyedOut = Join-Path $env:RUNNER_TEMP 'keyed-package'
+          $resource = Join-Path $privateRoot 'project-key.bin'
+          try {
+            New-Item -ItemType Directory -Force -Path $privateRoot, $keyedOut | Out-Null
+            [IO.File]::WriteAllText($resource, $env:CURSEFORGE_PROJECT_KEY.Trim(), [Text.UTF8Encoding]::new($false))
+            $env:CMUMCL_CF_PRIVATE_BUILD_ROOT = $privateRoot
+            $env:CMUMCL_CF_BUILD_RESOURCE = $resource
+            $env:CMUMCL_CURSEFORGE_API_KEY = ''
+            dotnet build CMUmcl/CMUmcl.csproj -c Release -p:Version=$env:VERSION --nologo
+            if ($LASTEXITCODE -ne 0) { throw 'Keyed client build failed' }
+            dotnet build CMUmcl.Updater/CMUmcl.Updater.csproj -c Release -p:Version=$env:VERSION --nologo
+            if ($LASTEXITCODE -ne 0) { throw 'Keyed updater build failed' }
+            $zip = & ./scripts/package-net48-release.ps1 -Version $env:VERSION `
+              -MainOutput (Join-Path $privateRoot 'bin\CMUmcl\Release\net48') `
+              -UpdaterOutput (Join-Path $privateRoot 'bin\CMUmcl.Updater\Release\net48') `
+              -OutputDirectory $keyedOut -RequireCurseForgeKey
+            if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($zip)) { throw 'Keyed packaging failed' }
+            "KEYED_ZIP=$zip" >> $env:GITHUB_ENV
+            "KEYED_DIR=$keyedOut" >> $env:GITHUB_ENV
+          }
+          finally {
+            Remove-Item -LiteralPath $resource -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $privateRoot -Recurse -Force -ErrorAction SilentlyContinue
+            $env:CMUMCL_CF_PRIVATE_BUILD_ROOT = ''
+            $env:CMUMCL_CF_BUILD_RESOURCE = ''
+          }
+
+      - name: Sign server net48 feed
+        if: steps.check.outputs.ok == 'true'
+        shell: pwsh
+        run: |
+          $keyPath = Join-Path $env:RUNNER_TEMP 'update-signing-key.pem'
+          $feedPath = Join-Path $env:RUNNER_TEMP 'keyed-package\latest.json'
+          try {
+            [IO.File]::WriteAllText($keyPath, $env:UPDATE_SIGNING_KEY_PEM, [Text.UTF8Encoding]::new($false))
+            $fileName = [IO.Path]::GetFileName($env:KEYED_ZIP)
+            $url = "https://csumcl.mcapcs.cn/update/windows-x86_64/net48/$fileName"
+            & ./scripts/sign-update-feed.ps1 -PackagePath $env:KEYED_ZIP -Version $env:VERSION `
+              -Url $url -PrivateKeyPath $keyPath -OutputPath $feedPath -Notes "CMUmcl $env:VERSION"
+            if ($LASTEXITCODE -ne 0) { throw 'Feed signing failed' }
+            "KEYED_FEED=$feedPath" >> $env:GITHUB_ENV
+          }
+          finally {
+            Remove-Item -LiteralPath $keyPath -Force -ErrorAction SilentlyContinue
+          }
+
+      - name: Deploy keyed ZIP and signed feed
+        if: steps.check.outputs.ok == 'true'
+        shell: pwsh
+        run: |
+          $keyPath = Join-Path $env:RUNNER_TEMP 'deploy_key'
+          $knownPath = Join-Path $env:RUNNER_TEMP 'known_hosts'
+          $feedUpload = '/tmp/net48-latest.json'
+          $deployScript = '/tmp/deploy-net48-feed.sh'
+          $fileName = [IO.Path]::GetFileName($env:KEYED_ZIP)
+          $zipHash = (Get-FileHash -LiteralPath $env:KEYED_ZIP -Algorithm SHA256).Hash.ToLowerInvariant()
+          $feedHash = (Get-FileHash -LiteralPath $env:KEYED_FEED -Algorithm SHA256).Hash.ToLowerInvariant()
+          try {
+            [IO.File]::WriteAllText($keyPath, $env:DEPLOY_SSH_KEY, [Text.UTF8Encoding]::new($false))
+            [IO.File]::WriteAllText($knownPath, $env:DEPLOY_KNOWN_HOSTS, [Text.UTF8Encoding]::new($false))
+            icacls $keyPath /inheritance:r | Out-Null
+            icacls $keyPath /grant:r "$($env:USERNAME):F" | Out-Null
+            $target = "$($env:DEPLOY_USER)@$($env:DEPLOY_HOST)"
+            $sshArgs = @('-o', 'StrictHostKeyChecking=yes', '-o', "UserKnownHostsFile=$knownPath",
+              '-o', 'ConnectTimeout=20', '-i', $keyPath)
+            & scp @sshArgs $env:KEYED_ZIP "${target}:/tmp/$fileName"
+            if ($LASTEXITCODE -ne 0) { throw 'ZIP upload failed' }
+            & scp @sshArgs $env:KEYED_FEED "${target}:$feedUpload"
+            if ($LASTEXITCODE -ne 0) { throw 'Feed upload failed' }
+            & scp @sshArgs 'scripts/deploy-net48-feed.sh' "${target}:$deployScript"
+            if ($LASTEXITCODE -ne 0) { throw 'Deploy script upload failed' }
+            & ssh @sshArgs $target "bash $deployScript $env:VERSION $fileName $zipHash $feedUpload $feedHash"
+            if ($LASTEXITCODE -ne 0) { throw 'Server deploy failed' }
+          }
+          finally {
+            Remove-Item -LiteralPath $keyPath -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $knownPath -Force -ErrorAction SilentlyContinue
+          }
+
+      - name: Cleanup local keyed artifacts
+        if: always()
+        shell: pwsh
+        run: |
+          Remove-Item -LiteralPath (Join-Path $env:RUNNER_TEMP 'private-build') -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item -LiteralPath (Join-Path $env:RUNNER_TEMP 'keyed-package') -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item -LiteralPath (Join-Path $env:RUNNER_TEMP 'deploy_key') -Force -ErrorAction SilentlyContinue
+          Remove-Item -LiteralPath (Join-Path $env:RUNNER_TEMP 'known_hosts') -Force -ErrorAction SilentlyContinue
+          Remove-Item -LiteralPath (Join-Path $env:RUNNER_TEMP 'update-signing-key.pem') -Force -ErrorAction SilentlyContinue

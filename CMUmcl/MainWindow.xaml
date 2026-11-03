@@ -418,10 +418,25 @@
                                             <Border Grid.Column="0" Width="52" Height="52" CornerRadius="6"
                                                     Background="{DynamicResource AccentSoftBrush}"
                                                     BorderBrush="{DynamicResource PanelBorderBrush}" BorderThickness="1"
-                                                    VerticalAlignment="Top">
-                                                <TextBlock Text="&#xE7FC;" FontFamily="Segoe MDL2 Assets" FontSize="24"
-                                                           Foreground="{DynamicResource AccentBrush}"
-                                                           HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                    VerticalAlignment="Top" ClipToBounds="True">
+                                                <Grid>
+                                                    <TextBlock Text="&#xE7FC;" FontFamily="Segoe MDL2 Assets" FontSize="24"
+                                                               Foreground="{DynamicResource AccentBrush}"
+                                                               HorizontalAlignment="Center" VerticalAlignment="Center">
+                                                        <TextBlock.Style>
+                                                            <Style TargetType="TextBlock">
+                                                                <Setter Property="Visibility" Value="Visible" />
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Binding="{Binding HasIcon}" Value="True">
+                                                                        <Setter Property="Visibility" Value="Collapsed" />
+                                                                    </DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </TextBlock.Style>
+                                                    </TextBlock>
+                                                    <Image Source="{Binding IconSource}" Stretch="UniformToFill"
+                                                           Visibility="{Binding HasIcon, Converter={StaticResource BoolToVisibility}}" />
+                                                </Grid>
                                             </Border>
 
                                             <!-- Info -->
@@ -450,6 +465,11 @@
                                                     <Border Style="{StaticResource Chip}" Margin="0,0,6,6">
                                                         <TextBlock Text="{Binding ServerText}" FontSize="11"
                                                                    Foreground="{DynamicResource MutedTextBrush}" />
+                                                    </Border>
+                                                    <Border Style="{StaticResource Chip}" Margin="0,0,6,6"
+                                                            Visibility="{Binding IsRequired, Converter={StaticResource BoolToVisibility}}">
+                                                        <TextBlock Text="必需" FontSize="11"
+                                                                   Foreground="{DynamicResource AccentBrush}" />
                                                     </Border>
                                                 </WrapPanel>
 
