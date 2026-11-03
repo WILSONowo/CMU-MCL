@@ -38,3 +38,10 @@
 - `scripts/deploy-net48-feed.sh`：在服务器上原子替换 feed、校验哈希、拒绝降级。
 
 不要把带 Key 的 ZIP、私钥、`CURSEFORGE_PROJECT_KEY` 或 SSH 私钥提交到仓库或上传到 GitHub Release。
+
+## Installer
+
+- GitHub Release: no-key ZIP plus `CMUmcl-<version>-setup.exe`. The wizard allows a custom install directory, creates Start Menu and optional desktop shortcuts, and keeps `sandbox-data` on uninstall.
+- Server downloads: keyed `CMUmcl-<version>-setup-full.exe` under `https://csumcl.mcapcs.cn/downloads/`.
+- Build scripts: `scripts/build-net48-installer.ps1` and `installer/CMUmcl.iss`.
+- Installers are unsigned; Windows SmartScreen may warn until a trusted signing certificate is configured.

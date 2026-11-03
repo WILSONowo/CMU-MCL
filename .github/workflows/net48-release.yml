@@ -54,6 +54,10 @@ jobs:
         with:
           dotnet-version: '9.0.x'
 
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
       - name: Resolve version
         id: version
         shell: pwsh
@@ -105,6 +109,18 @@ jobs:
           "PUBLIC_ZIP=$zip" >> $env:GITHUB_ENV
           "PUBLIC_ZIP_NAME=$([IO.Path]::GetFileName($zip))" >> $env:GITHUB_ENV
 
+      - name: Build public installer
+        id: installer
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP 'public-installer'
+          $setup = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./scripts/build-net48-installer.ps1 `
+            -PackageZip $env:PUBLIC_ZIP -Version $env:VERSION `
+            -OutputDirectory $out -BaseName "CMUmcl-$env:VERSION-setup"
+          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($setup)) { throw 'Installer build failed' }
+          "setup=$setup" >> $env:GITHUB_OUTPUT
+          "info=$(Join-Path $out 'installer-info.json')" >> $env:GITHUB_OUTPUT
+
       - name: Create GitHub release (public no-key ZIP)
         uses: softprops/action-gh-release@v2
         with:
@@ -112,6 +128,8 @@ jobs:
           name: "CMUmcl ${{ steps.version.outputs.version }}"
           files: |
             ${{ steps.package.outputs.zip }}
+            ${{ steps.installer.outputs.setup }}
+            ${{ steps.installer.outputs.info }}
             ${{ runner.temp }}/public-package/release-info.json
           generate_release_notes: true
 
@@ -135,6 +153,10 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '9.0.x'
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
 
       - name: Check server publish secrets
         id: check
@@ -179,6 +201,17 @@ jobs:
             $env:CMUMCL_CF_PRIVATE_BUILD_ROOT = ''
             $env:CMUMCL_CF_BUILD_RESOURCE = ''
           }
+
+      - name: Build keyed installer
+        if: steps.check.outputs.ok == 'true'
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP 'keyed-installer'
+          $setup = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./scripts/build-net48-installer.ps1 `
+            -PackageZip $env:KEYED_ZIP -Version $env:VERSION `
+            -OutputDirectory $out -BaseName "CMUmcl-$env:VERSION-setup-full"
+          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($setup)) { throw 'Keyed installer build failed' }
+          "KEYED_INSTALLER=$setup" >> $env:GITHUB_ENV
 
       - name: Sign server net48 feed
         if: steps.check.outputs.ok == 'true'
@@ -229,6 +262,20 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw 'Deploy script upload failed' }
             & ssh @sshArgs $target "bash $deployScript $env:VERSION $fileName $zipHash $feedUpload $feedHash"
             if ($LASTEXITCODE -ne 0) { throw 'Server deploy failed' }
+            if (-not [string]::IsNullOrWhiteSpace($env:KEYED_INSTALLER)) {
+              $installerName = [IO.Path]::GetFileName($env:KEYED_INSTALLER)
+              $installerHash = (Get-FileHash -LiteralPath $env:KEYED_INSTALLER -Algorithm SHA256).Hash.ToLowerInvariant()
+              $installerScript = '/tmp/deploy-net48-installer.sh'
+              & scp @sshArgs $env:KEYED_INSTALLER "${target}:/tmp/$installerName"
+              if ($LASTEXITCODE -ne 0) { throw 'Installer upload failed' }
+              $installerLocal = Join-Path $env:RUNNER_TEMP 'deploy-net48-installer.sh'
+              $installerText = [IO.File]::ReadAllText('scripts/deploy-net48-installer.sh')
+              [IO.File]::WriteAllText($installerLocal, $installerText.Replace("`r`n", "`n"), [Text.UTF8Encoding]::new($false))
+              & scp @sshArgs $installerLocal "${target}:$installerScript"
+              if ($LASTEXITCODE -ne 0) { throw 'Installer deploy script upload failed' }
+              & ssh @sshArgs $target "sh $installerScript $installerName $installerHash"
+              if ($LASTEXITCODE -ne 0) { throw 'Installer deploy failed' }
+            }
           }
           finally {
             Remove-Item -LiteralPath $keyPath -Force -ErrorAction SilentlyContinue
@@ -244,4 +291,6 @@ jobs:
           Remove-Item -LiteralPath (Join-Path $env:RUNNER_TEMP 'deploy_key') -Force -ErrorAction SilentlyContinue
           Remove-Item -LiteralPath (Join-Path $env:RUNNER_TEMP 'known_hosts') -Force -ErrorAction SilentlyContinue
           Remove-Item -LiteralPath (Join-Path $env:RUNNER_TEMP 'update-signing-key.pem') -Force -ErrorAction SilentlyContinue
+          Remove-Item -LiteralPath (Join-Path $env:RUNNER_TEMP 'keyed-installer') -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item -LiteralPath (Join-Path $env:RUNNER_TEMP 'deploy-net48-installer.sh') -Force -ErrorAction SilentlyContinue
           Remove-Item -LiteralPath (Join-Path $env:RUNNER_TEMP 'deploy-net48-feed.sh') -Force -ErrorAction SilentlyContinue

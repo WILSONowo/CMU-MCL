@@ -14,8 +14,14 @@
 !/.github/
 !/.github/workflows/
 !/.github/workflows/*.yml
+!/installer/
+!/installer/*.iss
 !/scripts/
+!/installer/
+!/installer/*.iss
 !/scripts/*.ps1
+!/installer/
+!/installer/*.iss
 !/scripts/*.sh
 !/docs/
 **/bin/
