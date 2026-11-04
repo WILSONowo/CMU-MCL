@@ -51,8 +51,11 @@ try {
         "/DCMUMCL_INSTALLER_NAME=$BaseName",
         $iss
     )
-    & $iscc @arguments
-    if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed with exit code $LASTEXITCODE." }
+    # The caller captures stdout as a single installer path, including across
+    # powershell.exe. Keep native compiler output in a separate reviewable log.
+    $compilerLog = Join-Path $output ($BaseName + '-compiler.log')
+    & $iscc @arguments *> $compilerLog
+    if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed with exit code $LASTEXITCODE. See $compilerLog" }
 
     $installer = Join-Path $output ($BaseName + '.exe')
     if (-not [IO.File]::Exists($installer)) { throw 'Installer output was not created.' }
@@ -70,5 +73,11 @@ try {
     Write-Output $installer
 }
 finally {
-    if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue }
+    $resolvedStage = [IO.Path]::GetFullPath($stage)
+    $tempRoot = [IO.Path]::GetFullPath($env:TEMP).TrimEnd('\') + '\'
+    if (-not $resolvedStage.StartsWith($tempRoot, [StringComparison]::OrdinalIgnoreCase) -or
+        [IO.Path]::GetFileName($resolvedStage) -notmatch '^cmumcl-installer-stage-[a-f0-9]{32}$') {
+        throw 'Refusing to remove an unexpected installer staging directory.'
+    }
+    if (Test-Path -LiteralPath $resolvedStage) { Remove-Item -LiteralPath $resolvedStage -Recurse -Force -ErrorAction SilentlyContinue }
 }

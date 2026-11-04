@@ -15,6 +15,30 @@ using CMUmcl.Update;
 
 internal static partial class Program
 {
+    private static int VerifyPublishedClient(string[] args)
+    {
+        try {
+            string root=Path.GetFullPath(args[1]);Directory.CreateDirectory(root);
+            using var http=new HttpClient(CMUmcl.Network.LauncherProxy.CreateHandler(allowAutoRedirect:false)){Timeout=TimeSpan.FromMinutes(3)};
+            byte[] feed=http.GetByteArrayAsync(UpdateProtocol.FeedUrl).GetAwaiter().GetResult();
+            var release=UpdateProtocol.ReadRelease(feed);
+            Check(release.Version=="0.3.48.12"&&UpdateProtocol.ParseVersion(release.Version)>new Version(0,3,48,11),"published signed client feed offers intended newer version");
+            File.WriteAllBytes(Path.Combine(root,"latest.json"),feed);
+            string package=Path.Combine(root,Path.GetFileName(new Uri(release.Url).AbsolutePath));
+            File.WriteAllBytes(package,http.GetByteArrayAsync(release.Url).GetAwaiter().GetResult());
+            UpdateProtocol.VerifyArchive(package,release);
+            Check(true,"published client archive verifies with existing client update public key");
+            string extracted=Path.Combine(root,"extracted-"+Guid.NewGuid().ToString("N"));
+            string[] files=UpdateProtocol.ExtractArchive(package,extracted);
+            Check(AssemblyName.GetAssemblyName(Path.Combine(extracted,"CMUmcl.exe")).Version==new Version(0,3,48,12),"published client payload version matches signed feed");
+            Check(files.All(name=>!name.EndsWith("SchematicPreviewWorker.exe",StringComparison.OrdinalIgnoreCase)),"published client update keeps preview extension optional");
+            var assembly=Assembly.LoadFile(Path.Combine(extracted,"CMUmcl.exe"));
+            Check(assembly.GetManifestResourceNames().Contains("CMUmcl.CurseForge.ProjectKey"),"server channel preserves existing keyed client distribution");
+            string pin=(string)assembly.GetType("CMUmcl.Content.SchematicPreviewProtocol")!.GetField("PublicKey",BindingFlags.Static|BindingFlags.NonPublic)!.GetRawConstantValue()!;
+            Check(pin==SchematicPreviewProtocol.PublicKey,"published client carries verified component channel key");
+            Console.WriteLine($"PASS {_checks} published client checks");return 0;
+        } catch(Exception ex) {Console.WriteLine(ex);return 1;}
+    }
     private static int VerifyClientPackage(string[] args)
     {
         try {

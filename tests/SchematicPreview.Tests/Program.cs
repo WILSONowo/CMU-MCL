@@ -22,6 +22,7 @@ internal static partial class Program
     [STAThread] private static int Main(string[] args)
     {
         if(args[0]=="--verify-client-package") return VerifyClientPackage(args);
+        if(args[0]=="--verify-published-client") return VerifyPublishedClient(args);
         if(args[0]=="--verify-channel" || args[0]=="--verify-public-channel") return VerifyPreparedChannel(args);
         if(args[0]=="--online") return OnlineMain(args);
         if(args[0]=="--interaction") return InteractionMain(args);

@@ -1,0 +1,100 @@
+name: net48 published installers
+
+on:
+  push:
+    branches: ['codex/publish-preview-installers']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: net48-installers-0.3.48.12
+  cancel-in-progress: false
+
+jobs:
+  installers:
+    runs-on: windows-latest
+    env:
+      VERSION: '0.3.48.12'
+      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST || '103.24.216.15' }}
+      DEPLOY_USER: ${{ secrets.DEPLOY_USER || 'root' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+      - name: Verify existing signed server package
+        shell: pwsh
+        run: |
+          dotnet build tests/SchematicPreview.Tests/SchematicPreview.Tests.csproj -c Release --nologo
+          if ($LASTEXITCODE -ne 0) { throw 'Acceptance build failed' }
+          $proof = Join-Path $env:RUNNER_TEMP 'server-proof'
+          & tests/SchematicPreview.Tests/bin/Release/net48/CMUmcl.SchematicPreview.Tests.exe --verify-published-client $proof
+          if ($LASTEXITCODE -ne 0) { throw 'Published client verification failed' }
+          $zip = @(Get-ChildItem -LiteralPath $proof -Filter '*.zip')
+          if ($zip.Count -ne 1) { throw 'Expected one verified server ZIP' }
+          "KEYED_ZIP=$($zip[0].FullName)" >> $env:GITHUB_ENV
+      - name: Download existing public ZIP and compile installers
+        id: installers
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $public = Join-Path $env:RUNNER_TEMP 'public-existing'
+          New-Item -ItemType Directory -Path $public | Out-Null
+          gh release download "v$env:VERSION" --repo $env:GITHUB_REPOSITORY --dir $public --pattern 'CMUmcl-*.zip'
+          if ($LASTEXITCODE -ne 0) { throw 'Public ZIP download failed' }
+          $zips = @(Get-ChildItem -LiteralPath $public -Filter '*.zip')
+          if ($zips.Count -ne 1) { throw 'Expected one public ZIP' }
+          & tests/SchematicPreview.Tests/bin/Release/net48/CMUmcl.SchematicPreview.Tests.exe --verify-client-package $zips[0].FullName (Join-Path $env:RUNNER_TEMP 'public-proof')
+          if ($LASTEXITCODE -ne 0) { throw 'Public ZIP verification failed' }
+          $publicOut = Join-Path $env:RUNNER_TEMP 'public-installer'
+          $keyedOut = Join-Path $env:RUNNER_TEMP 'keyed-installer'
+          $setup = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build-net48-installer.ps1 -PackageZip $zips[0].FullName -Version $env:VERSION -OutputDirectory $publicOut
+          if ($LASTEXITCODE -ne 0 -or @($setup).Count -ne 1 -or -not [IO.File]::Exists($setup)) { throw 'Public installer path contract failed' }
+          $full = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build-net48-installer.ps1 -PackageZip $env:KEYED_ZIP -Version $env:VERSION -OutputDirectory $keyedOut -BaseName "CMUmcl-$env:VERSION-setup-full"
+          if ($LASTEXITCODE -ne 0 -or @($full).Count -ne 1 -or -not [IO.File]::Exists($full)) { throw 'Server installer path contract failed' }
+          "setup=$setup" >> $env:GITHUB_OUTPUT
+          "info=$(Join-Path $publicOut 'installer-info.json')" >> $env:GITHUB_OUTPUT
+          "KEYED_INSTALLER=$full" >> $env:GITHUB_ENV
+      - name: Attach public installer to existing release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v0.3.48.12
+          fail_on_unmatched_files: true
+          files: |
+            ${{ steps.installers.outputs.setup }}
+            ${{ steps.installers.outputs.info }}
+      - name: Publish server installer
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        shell: pwsh
+        run: |
+          $keyPath = Join-Path $env:RUNNER_TEMP 'deploy_key'
+          $knownPath = Join-Path $env:RUNNER_TEMP 'known_hosts'
+          try {
+            [IO.File]::WriteAllText($keyPath, $env:DEPLOY_SSH_KEY, [Text.UTF8Encoding]::new($false))
+            [IO.File]::WriteAllText($knownPath, $env:DEPLOY_KNOWN_HOSTS, [Text.UTF8Encoding]::new($false))
+            icacls $keyPath /inheritance:r | Out-Null
+            icacls $keyPath /grant:r "$($env:USERNAME):F" | Out-Null
+            $sshArgs = @('-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes', '-o', "UserKnownHostsFile=$knownPath", '-o', 'ConnectTimeout=20', '-i', $keyPath)
+            $target = "$($env:DEPLOY_USER)@$($env:DEPLOY_HOST)"
+            $file = [IO.Path]::GetFileName($env:KEYED_INSTALLER)
+            $hash = (Get-FileHash -LiteralPath $env:KEYED_INSTALLER -Algorithm SHA256).Hash.ToLowerInvariant()
+            & scp @sshArgs $env:KEYED_INSTALLER "${target}:/tmp/$file"
+            if ($LASTEXITCODE -ne 0) { throw 'Installer upload failed' }
+            $local = Join-Path $env:RUNNER_TEMP 'deploy-installer.sh'
+            [IO.File]::WriteAllText($local, [IO.File]::ReadAllText('scripts/deploy-net48-installer.sh').Replace("`r`n", "`n"), [Text.UTF8Encoding]::new($false))
+            $remote = "/tmp/deploy-installer-$env:GITHUB_RUN_ID.sh"
+            & scp @sshArgs $local "${target}:$remote"
+            if ($LASTEXITCODE -ne 0) { throw 'Installer deploy script upload failed' }
+            & ssh @sshArgs $target "sh $remote $file $hash"
+            if ($LASTEXITCODE -ne 0) { throw 'Installer deployment failed' }
+          } finally {
+            Remove-Item -LiteralPath $keyPath, $knownPath -Force -ErrorAction SilentlyContinue
+          }
