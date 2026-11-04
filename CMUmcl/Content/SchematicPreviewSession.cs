@@ -11,7 +11,9 @@ internal sealed class SchematicPreviewSession : IDisposable
 {
     internal const string ComponentId = "schematic-preview";
     internal static string? RootOverride { get; set; }
-    internal static string ComponentRoot => RootOverride ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CMUmcl", "components", ComponentId);
+    private static readonly Lazy<string> DefaultComponentRoot = new(() => SchematicPreviewStorage.UnderDataRoot(
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CMUmcl")));
+    internal static string ComponentRoot => RootOverride ?? DefaultComponentRoot.Value;
     internal int WorkerId => _process.Id;
     internal string TemporaryDirectory => _temporary;
     private readonly string _temporary;

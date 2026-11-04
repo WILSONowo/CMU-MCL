@@ -33,7 +33,7 @@ jobs:
           dotnet build tests/SchematicPreview.Tests/SchematicPreview.Tests.csproj -c Release --nologo
           if ($LASTEXITCODE -ne 0) { throw 'Acceptance build failed' }
           $proof = Join-Path $env:RUNNER_TEMP 'server-proof'
-          & tests/SchematicPreview.Tests/bin/Release/net48/CMUmcl.SchematicPreview.Tests.exe --verify-published-client $proof
+          & tests/SchematicPreview.Tests/bin/Release/net48/CMUmcl.SchematicPreview.Tests.exe --verify-published-client $proof $env:VERSION
           if ($LASTEXITCODE -ne 0) { throw 'Published client verification failed' }
           $zip = @(Get-ChildItem -LiteralPath $proof -Filter '*.zip')
           if ($zip.Count -ne 1) { throw 'Expected one verified server ZIP' }
@@ -50,7 +50,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Public ZIP download failed' }
           $zips = @(Get-ChildItem -LiteralPath $public -Filter '*.zip')
           if ($zips.Count -ne 1) { throw 'Expected one public ZIP' }
-          & tests/SchematicPreview.Tests/bin/Release/net48/CMUmcl.SchematicPreview.Tests.exe --verify-client-package $zips[0].FullName (Join-Path $env:RUNNER_TEMP 'public-proof')
+          & tests/SchematicPreview.Tests/bin/Release/net48/CMUmcl.SchematicPreview.Tests.exe --verify-client-package $zips[0].FullName (Join-Path $env:RUNNER_TEMP 'public-proof') $env:VERSION
           if ($LASTEXITCODE -ne 0) { throw 'Public ZIP verification failed' }
           $publicOut = Join-Path $env:RUNNER_TEMP 'public-installer'
           $keyedOut = Join-Path $env:RUNNER_TEMP 'keyed-installer'

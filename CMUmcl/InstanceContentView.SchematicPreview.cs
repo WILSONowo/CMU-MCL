@@ -42,7 +42,7 @@ internal sealed partial class InstanceContentView
         buttons.Children.Add(Button("← 返回原理图",()=>{StopSchematicPreview();_generation++;ShowSchematics();_status.Text="";}));
         bool Current()=>!Closed && _generation==generation;
         void State() {
-            string? version=null;try{version=SchematicPreviewSession.InstalledVersion();}catch(Exception ex){details.Text="扩展状态需要修复："+ex.Message;return;}
+            string? version=null;try{version=SchematicPreviewSession.InstalledVersion();}catch(Exception ex){install.IsEnabled=false;details.Text="扩展状态需要修复："+ex.Message;_status.Text="扩展目录不可用，暂时无法安装。";return;}
             details.Text=version==null?"尚未安装预览扩展":"当前扩展版本："+version;
             if(offer!=null) {
                 details.Text+=$"\n在线版本：{offer.Release.Version} · {offer.Release.Size/1048576.0:F2} MiB\n{offer.Release.Notes}";

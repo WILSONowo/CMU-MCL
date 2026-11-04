@@ -22,7 +22,8 @@ internal static partial class Program
             using var http=new HttpClient(CMUmcl.Network.LauncherProxy.CreateHandler(allowAutoRedirect:false)){Timeout=TimeSpan.FromMinutes(3)};
             byte[] feed=http.GetByteArrayAsync(UpdateProtocol.FeedUrl).GetAwaiter().GetResult();
             var release=UpdateProtocol.ReadRelease(feed);
-            Check(release.Version=="0.3.48.12"&&UpdateProtocol.ParseVersion(release.Version)>new Version(0,3,48,11),"published signed client feed offers intended newer version");
+            string expected=args.Length>2?args[2]:SchematicPreviewProtocol.CurrentLauncher.ToString();
+            Check(release.Version==expected&&UpdateProtocol.ParseVersion(release.Version)>new Version(0,3,48,11),"published signed client feed offers intended newer version");
             File.WriteAllBytes(Path.Combine(root,"latest.json"),feed);
             string package=Path.Combine(root,Path.GetFileName(new Uri(release.Url).AbsolutePath));
             File.WriteAllBytes(package,http.GetByteArrayAsync(release.Url).GetAwaiter().GetResult());
@@ -30,7 +31,7 @@ internal static partial class Program
             Check(true,"published client archive verifies with existing client update public key");
             string extracted=Path.Combine(root,"extracted-"+Guid.NewGuid().ToString("N"));
             string[] files=UpdateProtocol.ExtractArchive(package,extracted);
-            Check(AssemblyName.GetAssemblyName(Path.Combine(extracted,"CMUmcl.exe")).Version==new Version(0,3,48,12),"published client payload version matches signed feed");
+            Check(AssemblyName.GetAssemblyName(Path.Combine(extracted,"CMUmcl.exe")).Version==UpdateProtocol.ParseVersion(expected),"published client payload version matches signed feed");
             Check(files.All(name=>!name.EndsWith("SchematicPreviewWorker.exe",StringComparison.OrdinalIgnoreCase)),"published client update keeps preview extension optional");
             var assembly=Assembly.LoadFile(Path.Combine(extracted,"CMUmcl.exe"));
             Check(assembly.GetManifestResourceNames().Contains("CMUmcl.CurseForge.ProjectKey"),"server channel preserves existing keyed client distribution");
@@ -45,7 +46,8 @@ internal static partial class Program
             string directory=Path.Combine(Path.GetFullPath(args[2]),"extracted-"+Guid.NewGuid().ToString("N"));
             string[] files=UpdateProtocol.ExtractArchive(args[1],directory);
             var assembly=Assembly.LoadFile(Path.Combine(directory,"CMUmcl.exe"));
-            Check(assembly.GetName().Version!.ToString()=="0.3.48.12","prepared client package has intended release version");
+            string expected=args.Length>3?args[3]:SchematicPreviewProtocol.CurrentLauncher.ToString();
+            Check(assembly.GetName().Version!.ToString()==expected,"prepared client package has intended release version");
             Check(!assembly.GetManifestResourceNames().Contains("CMUmcl.CurseForge.ProjectKey"),"prepared public client has no injected CurseForge key");
             Check(files.All(name=>!name.EndsWith("SchematicPreviewWorker.exe",StringComparison.OrdinalIgnoreCase)),"optional worker is absent from client update package");
             string pin=(string)assembly.GetType("CMUmcl.Content.SchematicPreviewProtocol")!.GetField("PublicKey",BindingFlags.Static|BindingFlags.NonPublic)!.GetRawConstantValue()!;
@@ -235,9 +237,9 @@ internal static partial class Program
         await Ui(input,pack);
         await OptionalOnlineUi(fixture,zip);
     }
-    private static async Task OptionalOnlineUi(ComponentFixture fixture,byte[] zip)
+    private static async Task OptionalOnlineUi(ComponentFixture fixture,byte[] zip,string? root=null)
     {
-        SchematicPreviewSession.RootOverride=Path.Combine(_output,"optional-ui-"+Guid.NewGuid().ToString("N"));
+        SchematicPreviewSession.RootOverride=root??Path.Combine(_output,"optional-ui-"+Guid.NewGuid().ToString("N"));
         var transport=new ComponentTransport{Zip=zip,Feed=fixture.Feed(zip,"0.2.2")};int confirmations=0;
         var view=new InstanceContentView(_output,_output,"可选扩展测试",()=>false,(_,_)=>{confirmations++;return Task.FromResult(false);});
         view.PreviewUpdatesFactory=()=>new SchematicPreviewUpdateClient(new HttpClient(transport,false),fixture.PublicKey);
