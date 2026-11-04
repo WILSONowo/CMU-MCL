@@ -117,7 +117,7 @@ jobs:
           $setup = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./scripts/build-net48-installer.ps1 `
             -PackageZip $env:PUBLIC_ZIP -Version $env:VERSION `
             -OutputDirectory $out -BaseName "CMUmcl-$env:VERSION-setup"
-          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($setup)) { throw 'Installer build failed' }
+          if ($LASTEXITCODE -ne 0 -or @($setup).Count -ne 1 -or -not [IO.File]::Exists($setup)) { throw 'Installer build failed or returned an invalid path' }
           "setup=$setup" >> $env:GITHUB_OUTPUT
           "info=$(Join-Path $out 'installer-info.json')" >> $env:GITHUB_OUTPUT
 
@@ -126,6 +126,7 @@ jobs:
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           name: "CMUmcl ${{ steps.version.outputs.version }}"
+          fail_on_unmatched_files: true
           files: |
             ${{ steps.package.outputs.zip }}
             ${{ steps.installer.outputs.setup }}
@@ -210,7 +211,7 @@ jobs:
           $setup = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./scripts/build-net48-installer.ps1 `
             -PackageZip $env:KEYED_ZIP -Version $env:VERSION `
             -OutputDirectory $out -BaseName "CMUmcl-$env:VERSION-setup-full"
-          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($setup)) { throw 'Keyed installer build failed' }
+          if ($LASTEXITCODE -ne 0 -or @($setup).Count -ne 1 -or -not [IO.File]::Exists($setup)) { throw 'Keyed installer build failed or returned an invalid path' }
           "KEYED_INSTALLER=$setup" >> $env:GITHUB_ENV
 
       - name: Sign server net48 feed
