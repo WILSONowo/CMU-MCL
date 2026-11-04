@@ -21,6 +21,8 @@
 - 公网下载后用原有客户端固定公钥复核清单及 ZIP 签名、大小和哈希；确认包内版本、项目 Key 资源存在、预览 worker 未捆绑、独立组件公钥一致，共 6 项通过。日志：`D:\新启动器\outputs\schematic-published-client-proof.log`。
 - 首次工作流 <https://github.com/yuhui258036/CMU-MCL/actions/runs/41806620847> 完成公开 ZIP、服务端签名清单和 ZIP，但安装器编译日志混入 stdout 路径，导致安装器上传失败。修复打包脚本输出约定、添加路径断言及缺失产物失败检查；本机通过子进程调用复验仅返回一个实际安装器路径。
 - 安装器从上述已发布原始 ZIP 补建，不重新生成或覆盖同版本客户端 ZIP、更新签名和发行标签。补建流程：<https://github.com/yuhui258036/CMU-MCL/actions/runs/41807357210>。
+- 补建流程已成功。GitHub 无 Key 安装器 4,580,055 字节，SHA-256 `2ae4c0e1bdf6dd6d39bb34f74129f2ce5bb1f30165908f030ddfe19ee1f1d84e`；服务器安装器 4,580,239 字节，SHA-256 `e368b8df20b4bd188975e7d00bbc7e60b56083327156a3475bf4035039bc87ca`。两者均从实际公开下载地址重新下载复核，GitHub ZIP 也与发布元数据一致；两份在线清单再次下载与已验证字节一致。
+- 最终回执：`D:\新启动器\outputs\schematic-online-local-test\publication-receipt.json`，2026-11-04 17:28（Asia/Shanghai）。客户端下载：<https://csumcl.mcapcs.cn/downloads/CMUmcl-0.3.48.12-setup-full.exe>。
 - 本机候选目录 `client-release/` 中的旧 ZIP 和安装器是发布前构建。正式下载以线上 Release/更新清单为准，避免混用哈希。
 
 ## SSH 与发布权限
