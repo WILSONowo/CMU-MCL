@@ -1,0 +1,70 @@
+name: schematic preview channel
+
+on:
+  push:
+    branches: ['codex/schematic-preview-channel']
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Existing signed component release tag; empty means login check only'
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: schematic-preview-channel
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST || '103.24.216.15' }}
+      DEPLOY_USER: ${{ secrets.DEPLOY_USER || 'root' }}
+      RELEASE_TAG: ${{ inputs.release_tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify deployment login
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$RUNNER_TEMP/deploy_key"
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$RUNNER_TEMP/deploy_known_hosts"
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 \
+            -o UserKnownHostsFile="$RUNNER_TEMP/deploy_known_hosts" -i "$RUNNER_TEMP/deploy_key" \
+            "$DEPLOY_USER@$DEPLOY_HOST" 'test -d /opt/pcl-cmu/wwwroot && printf "DEPLOY_LOGIN_OK\n"'
+      - name: Download existing signed release
+        if: github.event_name == 'workflow_dispatch' && inputs.release_tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^schematic-preview-[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          mkdir "$RUNNER_TEMP/component"
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir "$RUNNER_TEMP/component" \
+            --pattern 'SchematicPreview-*.zip' --pattern latest.json
+          python3 scripts/verify-schematic-channel.py "$RUNNER_TEMP/component"
+      - name: Publish component before manifest
+        if: github.event_name == 'workflow_dispatch' && inputs.release_tag != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          target="$DEPLOY_USER@$DEPLOY_HOST"
+          sshargs=(-o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 -o "UserKnownHostsFile=$RUNNER_TEMP/deploy_known_hosts" -i "$RUNNER_TEMP/deploy_key")
+          upload="/tmp/cmumcl-schematic-$GITHUB_RUN_ID"
+          ssh "${sshargs[@]}" "$target" "mkdir -m 700 '$upload'"
+          scp "${sshargs[@]}" "$RUNNER_TEMP"/component/* scripts/deploy-schematic-channel.sh "$target:$upload/"
+          ssh "${sshargs[@]}" "$target" "bash '$upload/deploy-schematic-channel.sh' '$upload'"
+      - name: Cleanup runner credentials
+        if: always()
+        shell: bash
+        run: |
+          rm -f "$RUNNER_TEMP/deploy_key" "$RUNNER_TEMP/deploy_known_hosts"
