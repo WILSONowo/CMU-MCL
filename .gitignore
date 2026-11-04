@@ -23,7 +23,11 @@
 !/installer/
 !/installer/*.iss
 !/scripts/*.sh
+!/scripts/*.py
 !/docs/
+!/components/
+/components/**/target/
+/components/**/artifacts/
 **/bin/
 **/obj/
 **/.vs/
@@ -46,3 +50,4 @@
 !/tests/Community.Tests/
 !/tests/LauncherSettings.Tests/
 !/tests/ResourceDownload.Tests/
+!/tests/SchematicPreview.Tests/

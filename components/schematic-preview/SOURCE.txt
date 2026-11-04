@@ -1,0 +1,27 @@
+Local development build. Not an online release or a signed distribution package.
+
+Upstream: https://github.com/Arcadi4/LitematicaPreview/tree/v0.5.2
+Upstream commit: bdd61b6d5a048061c430a999032d9e2a3df01ded
+The src/render files, except mod.rs, are copied from src-tauri/src/render at v0.5.2.
+All these upstream renderer files are unmodified, including context.rs.
+The adapter creates a dedicated native child viewport at startup, then calls
+NativeRenderer::new_from_hwnd, the upstream progressive attach_batch pipeline
+and direct DX12 swapchain presentation. There is no reparented desktop app,
+GPU readback, image encoding or image transport in the production path.
+No renderer, camera, mesher or schematic parser has been reimplemented.
+Core: 87838a6dcca60010f2af63dd6c733a5010ec6a27 (Cargo.lock pins dependencies).
+License: AGPL-3.0-only, see upstream/LICENSE and upstream/NOTICE.
+
+Build with Rust stable MSVC, Visual Studio x64 C++ tools and Windows SDK:
+  powershell -File scripts/build-schematic-preview.ps1
+Install locally from the launcher's schematics page by selecting component.json.
+Select a legally obtained complete Minecraft Java resource-pack ZIP separately.
+No Assets/pack.zip or demo schematics are included in the component.
+
+This worker is independent of the GPL launcher. JSON lines carry controls and
+metadata only; native mouse/keyboard messages are handled by the worker's own
+viewport message loop. It does not link the launcher's assemblies. The AGPL source
+is components/schematic-preview including its upstream notices and lockfile.
+Before public distribution, package corresponding source, dependency licenses
+and reviewed licensing information alongside the worker. This local build script
+does not constitute the final signed release pipeline.

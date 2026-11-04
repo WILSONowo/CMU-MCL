@@ -1,0 +1,28 @@
+[package]
+name = "cmumcl-schematic-preview"
+version = "0.2.2"
+edition = "2021"
+license = "AGPL-3.0-only"
+
+[[bin]]
+name = "SchematicPreviewWorker"
+path = "src/main.rs"
+
+[dependencies]
+litematica-preview-core = { git = "https://github.com/Arcadi4/litematica-preview-core", rev = "87838a6dcca60010f2af63dd6c733a5010ec6a27" }
+nucleation = { version = "=0.11.0", default-features = false, features = ["meshing"] }
+wgpu = "=30.0.1"
+pollster = "=1.0.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Graphics_Gdi", "Win32_System_LibraryLoader", "Win32_System_Threading", "Win32_UI_HiDpi", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }
+
+[patch.crates-io]
+schematic-mesher = { git = "https://github.com/Schem-at/Schematic-Mesher.git", rev = "286323e472cd8a5363b66a035a3be02ecdd4f164" }
+
+[profile.dev]
+debug = false
+
+[profile.release]
+panic = "unwind"
+strip = "debuginfo"

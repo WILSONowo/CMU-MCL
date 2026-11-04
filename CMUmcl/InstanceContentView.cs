@@ -11,7 +11,7 @@ using System.Windows.Media.Imaging;
 
 namespace CMUmcl;
 
-internal sealed class InstanceContentView : UserControl
+internal sealed partial class InstanceContentView : UserControl
 {
     private readonly InstanceContentFiles _files;
     private readonly string _instanceDirectory;
@@ -45,10 +45,10 @@ internal sealed class InstanceContentView : UserControl
         Grid.SetColumn(_body,1);body.Children.Add(_body);Grid.SetRow(_status,2);_status.Margin=new Thickness(0,10,0,0);root.Children.Add(_status);
         _navigation.SelectionChanged+=(_,_)=>ShowPage();_navigation.SelectedIndex=0;
     }
-    internal void Close(){if(Closed)return;Closed=true;_generation++;_modIcons?.Dispose();}
+    internal void Close(){if(Closed)return;Closed=true;StopSchematicPreview();_generation++;_modIcons?.Dispose();}
     private void ShowPage()
     {
-        _generation++;_selected.Clear();_status.Text="";
+        StopSchematicPreview();_generation++;_selected.Clear();_status.Text="";
         if(_navigation.SelectedIndex==0)
         {
             var panel=new WrapPanel();
@@ -145,7 +145,7 @@ internal sealed class InstanceContentView : UserControl
         var grid=new Grid();foreach(var height in new[]{GridLength.Auto,GridLength.Auto,GridLength.Auto,new GridLength(1,GridUnitType.Star)})grid.RowDefinitions.Add(new(){Height=height});_body.Content=grid;
         var searchPanel=new StackPanel();searchPanel.Children.Add(Label("搜索原理图文件名",12));var search=new TextBox{MinHeight=36,Margin=new Thickness(4)};searchPanel.Children.Add(search);grid.Children.Add(searchPanel);
         var summary=Label("",13);var panel=new StackPanel();
-        var toolbar=new WrapPanel();toolbar.Children.Add(Button("打开文件夹",()=>OpenFolder("schematics")));toolbar.Children.Add(Button("刷新",()=>Render()));Grid.SetRow(toolbar,1);grid.Children.Add(toolbar);
+        var toolbar=new WrapPanel();toolbar.Children.Add(Button("打开文件夹",()=>OpenFolder("schematics")));toolbar.Children.Add(Button("刷新",()=>Render()));toolbar.Children.Add(Button("预览扩展",ShowSchematicExtension));Grid.SetRow(toolbar,1);grid.Children.Add(toolbar);
         Grid.SetRow(summary,2);grid.Children.Add(summary);
         var scroll=new ScrollViewer{Content=panel,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled};Grid.SetRow(scroll,3);grid.Children.Add(scroll);
         async void Render()
@@ -195,7 +195,7 @@ internal sealed class InstanceContentView : UserControl
         var row=new Grid{MinHeight=76,Margin=new Thickness(12,4,8,4),Focusable=true,Background=Brushes.Transparent};row.ColumnDefinitions.Add(new(){Width=new GridLength(56)});row.ColumnDefinitions.Add(new(){Width=new GridLength(1,GridUnitType.Star)});row.ColumnDefinitions.Add(new(){Width=GridLength.Auto});
         var icon=new Border{Width=40,Height=40,CornerRadius=new CornerRadius(5),Child=new TextBlock{Text="\uE8A5",FontFamily=new FontFamily("Segoe MDL2 Assets"),FontSize=22,VerticalAlignment=VerticalAlignment.Center,HorizontalAlignment=HorizontalAlignment.Center}};icon.SetResourceReference(Border.BackgroundProperty,"AccentSoftBrush");icon.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty,"AccentBrush");row.Children.Add(icon);
         var title=RowText(Path.GetFileName(path),14,false);title.FontWeight=FontWeights.SemiBold;title.VerticalAlignment=VerticalAlignment.Center;title.Margin=new Thickness(0,0,12,0);Grid.SetColumn(title,1);row.Children.Add(title);
-        var preview=Button("快速预览",()=>_status.Text="快速预览需要下载扩展版本；当前版本暂未提供下载，请等待后续扩展组件。");preview.VerticalAlignment=VerticalAlignment.Center;Grid.SetColumn(preview,2);row.Children.Add(preview);
+        var preview=Button("快速预览",()=>OpenSchematicPreview(path));preview.VerticalAlignment=VerticalAlignment.Center;Grid.SetColumn(preview,2);row.Children.Add(preview);
         void Reveal(bool show){preview.Opacity=show?1:0;preview.IsHitTestVisible=show;preview.IsTabStop=show;}
         Reveal(false);row.MouseEnter+=(_,_)=>Reveal(true);row.MouseLeave+=(_,_)=>Reveal(row.IsKeyboardFocusWithin);row.GotKeyboardFocus+=(_,_)=>Reveal(true);row.LostKeyboardFocus+=(_,_)=>Reveal(row.IsMouseOver);
         var card=new Border{Child=row,BorderThickness=new Thickness(1),CornerRadius=new CornerRadius(5),Margin=new Thickness(0,3,0,3)};card.SetResourceReference(Border.BackgroundProperty,"PanelBrush");card.SetResourceReference(Border.BorderBrushProperty,"PanelBorderBrush");target.Children.Add(card);

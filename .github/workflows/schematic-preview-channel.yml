@@ -62,7 +62,14 @@ jobs:
           upload="/tmp/cmumcl-schematic-$GITHUB_RUN_ID"
           ssh "${sshargs[@]}" "$target" "mkdir -m 700 '$upload'"
           scp "${sshargs[@]}" "$RUNNER_TEMP"/component/* scripts/deploy-schematic-channel.sh "$target:$upload/"
-          ssh "${sshargs[@]}" "$target" "bash '$upload/deploy-schematic-channel.sh' '$upload'"
+          eval "$(python3 - "$RUNNER_TEMP/component/latest.json" <<'PY'
+          import base64,json,pathlib,hashlib,shlex,sys
+          p=pathlib.Path(sys.argv[1]);r=json.loads(base64.b64decode(json.loads(p.read_bytes())['payload']))
+          for k,v in dict(file=r['url'].rsplit('/',1)[1],version=r['version'],zip_hash=r['sha256'],feed_hash=hashlib.sha256(p.read_bytes()).hexdigest()).items():
+              print(k+'='+shlex.quote(v))
+          PY
+          )"
+          ssh "${sshargs[@]}" "$target" "bash '$upload/deploy-schematic-channel.sh' '$upload' '$file' '$version' '$zip_hash' '$feed_hash'"
       - name: Cleanup runner credentials
         if: always()
         shell: bash

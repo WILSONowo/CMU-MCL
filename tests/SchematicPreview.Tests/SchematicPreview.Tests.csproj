@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><TargetFramework>net48</TargetFramework><OutputType>Exe</OutputType><AssemblyName>CMUmcl.SchematicPreview.Tests</AssemblyName><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><UseWPF>true</UseWPF><AutomaticallyUseReferenceAssemblyPackages>false</AutomaticallyUseReferenceAssemblyPackages><PlatformTarget>x64</PlatformTarget><ApplicationManifest>../../CMUmcl/app.manifest</ApplicationManifest></PropertyGroup>
+  <ItemGroup><Reference Include="UIAutomationClient"/><Reference Include="UIAutomationTypes"/></ItemGroup>
+  <ItemGroup><ProjectReference Include="../../CMUmcl/CMUmcl.csproj"/><Compile Remove="../../Compatibility.cs"/></ItemGroup>
+  <ItemGroup><None Include="../../CMUmcl/MainWindow.xaml" Link="MainWindow.source.xaml" CopyToOutputDirectory="PreserveNewest"/><None Include="../../CMUmcl/App.xaml" Link="App.source.xaml" CopyToOutputDirectory="PreserveNewest"/></ItemGroup>
+</Project>
