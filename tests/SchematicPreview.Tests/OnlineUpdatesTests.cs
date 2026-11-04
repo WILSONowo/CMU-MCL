@@ -79,7 +79,7 @@ internal static partial class Program
             Check(File.Exists(Path.Combine(SchematicPreviewSession.ComponentRoot,"versions",release.Version,"Source.zip")),"prepared signed package includes source archive");
             using(var sources=ZipFile.OpenRead(Path.Combine(SchematicPreviewSession.ComponentRoot,"versions",release.Version,"Source.zip"))) {
                 Check(sources.GetEntry("components/schematic-preview/src/main.rs")!=null&&sources.GetEntry("scripts/build-schematic-preview.ps1")!=null,"source archive preserves buildable repository layout");
-                Check(sources.Entries.All(e=>!e.FullName.EndsWith(".pem",StringComparison.OrdinalIgnoreCase)&&!e.FullName.Contains("pack.zip")),"source archive excludes signing keys and Minecraft texture pack");
+                Check(sources.Entries.All(e=>!e.FullName.EndsWith(".pem",StringComparison.OrdinalIgnoreCase)&&(!e.FullName.EndsWith(".zip",StringComparison.OrdinalIgnoreCase)||e.FullName=="components/schematic-preview/resources/base-pack.zip")),"source archive excludes signing keys and custom user packs");
             }
             if(live&&args.Length>5) {
                 SchematicPreviewSession.RootOverride=Path.Combine(_output,"upgrade-"+Guid.NewGuid().ToString("N"));

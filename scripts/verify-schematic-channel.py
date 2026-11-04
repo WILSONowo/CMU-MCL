@@ -44,7 +44,8 @@ def verify(root):
         assert release['formatVersion'] == 1
         assert release['component'] == 'schematic-preview' and release['apiVersion'] == 2
         assert re.fullmatch(r'\d+\.\d+\.\d+', release['version'])
-        assert release['minLauncherVersion'] == '0.3.48.12'
+        assert re.fullmatch(r'\d+\.\d+\.\d+(?:\.\d+)?', release['minLauncherVersion'])
+        assert tuple(map(int,release['minLauncherVersion'].split('.'))) >= (0,3,48,12)
         filename = f"SchematicPreview-{release['version']}-{release['sha256'][:16]}.zip"
         assert release['url'] == 'https://csumcl.mcapcs.cn/components/schematic-preview/' + filename
         archive = root / filename
@@ -57,6 +58,10 @@ def verify(root):
             manifest = json.loads(z.read('component.json'))
             assert manifest['version'] == release['version'] and manifest['apiVersion'] == 2
             assert {'Source.zip', 'LICENSE', 'NOTICE', 'SOURCE.txt'}.issubset(z.namelist())
+            if tuple(map(int,release['version'].split('.'))) >= (0,2,3):
+                import io
+                with zipfile.ZipFile(io.BytesIO(z.read('Source.zip'))) as sources:
+                    assert hashlib.sha256(sources.read('components/schematic-preview/resources/base-pack.zip')).hexdigest() == '28489e81959ca494934557b2ad5e0fdbbfdf9feaea8bc6266d5f0e915da45c02'
     print('VERIFIED', release['version'], filename, release['sha256'])
 
 

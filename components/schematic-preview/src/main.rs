@@ -1,8 +1,9 @@
+mod materials;
 mod native;
 mod render;
 
 use litematica_preview_core::{MeshStream, PreviewInfo, PreviewOptions};
-use nucleation::{formats::limits::DecodeLimits, meshing::ResourcePackSource};
+use nucleation::formats::limits::DecodeLimits;
 use serde::Deserialize;
 use std::fs::File;
 use std::io::{self, Read, Write};
@@ -13,7 +14,10 @@ use std::time::{Duration, Instant};
 #[serde(deny_unknown_fields)]
 struct Request {
     input: String,
+    #[serde(default)]
     pack: String,
+    #[serde(default)]
+    packs: Vec<materials::PackLayer>,
     parent: isize,
     parent_process: u32,
     #[serde(default)]
@@ -108,12 +112,7 @@ fn load(
     if source.block_count() == 0 {
         return Err("The schematic contains no blocks".into());
     }
-    let pack_bytes = bounded_read(&request.pack, 256 * 1024 * 1024)?;
-    let pack = litematica_preview_core::resource_pack_overlay(
-        &ResourcePackSource::from_resource_pack(Default::default()),
-        &pack_bytes,
-    )?;
-    drop(pack_bytes);
+    let pack = materials::load(&request.pack, &request.packs)?;
     let origin = source.content_origin();
     let size = source.content_dimensions();
     let min = [

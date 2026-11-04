@@ -1,4 +1,4 @@
-Local development build. Not an online release or a signed distribution package.
+CMUmcl optional native preview component 0.2.3, API 2.
 
 Upstream: https://github.com/Arcadi4/LitematicaPreview/tree/v0.5.2
 Upstream commit: bdd61b6d5a048061c430a999032d9e2a3df01ded
@@ -15,13 +15,21 @@ License: AGPL-3.0-only, see upstream/LICENSE and upstream/NOTICE.
 Build with Rust stable MSVC, Visual Studio x64 C++ tools and Windows SDK:
   powershell -File scripts/build-schematic-preview.ps1
 Install locally from the launcher's schematics page by selecting component.json.
-Select a legally obtained complete Minecraft Java resource-pack ZIP separately.
-No Assets/pack.zip or demo schematics are included in the component.
+The worker embeds resources/base-pack.zip, the unchanged Assets/pack.zip from
+upstream v0.5.2. No external base-pack installation is needed. Minecraft assets
+retain their separate copyright and are not licensed under AGPL; see
+upstream/NOTICE and resources/NOTICE.txt. Custom user packs are not distributed.
+src/materials.rs reuses upstream PackLayer and compose_resource_packs from
+src-tauri/src/preview.rs. Layers are highest first, merged lowest to highest;
+missing per-key textures, models and blockstates fall back to the base.
+Legacy single-pack API-2 requests remain supported with the same base fallback.
+Launcher 0.3.48.14 adds persisted import/enable/disable/priority controls.
 
 This worker is independent of the GPL launcher. JSON lines carry controls and
 metadata only; native mouse/keyboard messages are handled by the worker's own
 viewport message loop. It does not link the launcher's assemblies. The AGPL source
 is components/schematic-preview including its upstream notices and lockfile.
-Before public distribution, package corresponding source, dependency licenses
-and reviewed licensing information alongside the worker. This local build script
-does not constitute the final signed release pipeline.
+The signed archive contains corresponding source (including resources), build
+script, lockfile and upstream/dependency notices in Source.zip and Licenses.
+The build script creates a local component; package-schematic-preview.ps1 signs
+the independent archive and feed. No demo schematics are included.

@@ -24,6 +24,8 @@ internal static partial class Program
         if(args[0]=="--verify-client-package") return VerifyClientPackage(args);
         if(args[0]=="--junction") return JunctionMain(args);
         if(args[0]=="--verify-live-install") return LiveInstallMain(args);
+        if(args[0]=="--materials") return MaterialsMain(args);
+        if(args[0]=="--material-state") {SchematicPreviewSession.RootOverride=args[1];Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(SchematicPreviewMaterials.Read()));return 0;}
         if(args[0]=="--verify-published-client") return VerifyPublishedClient(args);
         if(args[0]=="--verify-channel" || args[0]=="--verify-public-channel") return VerifyPreparedChannel(args);
         if(args[0]=="--online") return OnlineMain(args);

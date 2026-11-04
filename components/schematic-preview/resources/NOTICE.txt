@@ -1,0 +1,9 @@
+base-pack.zip is the unchanged Assets/pack.zip from LitematicaPreview v0.5.2.
+SHA-256: 28489e81959ca494934557b2ad5e0fdbbfdf9feaea8bc6266d5f0e915da45c02
+Source: https://github.com/Arcadi4/LitematicaPreview/blob/v0.5.2/Assets/pack.zip
+
+These Minecraft assets are copyright Mojang AB and/or its licensors.
+They are separate from the AGPL source code and are not relicensed under AGPL.
+The upstream resource-pack notice is preserved in ../upstream/NOTICE and in
+the component distribution's NOTICE. The base provides offline schematic
+preview resources; no custom user resource pack is included.

@@ -145,7 +145,7 @@ internal sealed partial class InstanceContentView : UserControl
         var grid=new Grid();foreach(var height in new[]{GridLength.Auto,GridLength.Auto,GridLength.Auto,new GridLength(1,GridUnitType.Star)})grid.RowDefinitions.Add(new(){Height=height});_body.Content=grid;
         var searchPanel=new StackPanel();searchPanel.Children.Add(Label("搜索原理图文件名",12));var search=new TextBox{MinHeight=36,Margin=new Thickness(4)};searchPanel.Children.Add(search);grid.Children.Add(searchPanel);
         var summary=Label("",13);var panel=new StackPanel();
-        var toolbar=new WrapPanel();toolbar.Children.Add(Button("打开文件夹",()=>OpenFolder("schematics")));toolbar.Children.Add(Button("刷新",()=>Render()));toolbar.Children.Add(Button("预览扩展",ShowSchematicExtension));Grid.SetRow(toolbar,1);grid.Children.Add(toolbar);
+        var toolbar=new WrapPanel();toolbar.Children.Add(Button("打开文件夹",()=>OpenFolder("schematics")));toolbar.Children.Add(Button("刷新",()=>Render()));toolbar.Children.Add(Button("预览扩展",ShowSchematicExtension));toolbar.Children.Add(Button("预览材质",()=>ShowSchematicMaterials()));Grid.SetRow(toolbar,1);grid.Children.Add(toolbar);
         Grid.SetRow(summary,2);grid.Children.Add(summary);
         var scroll=new ScrollViewer{Content=panel,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled};Grid.SetRow(scroll,3);grid.Children.Add(scroll);
         async void Render()

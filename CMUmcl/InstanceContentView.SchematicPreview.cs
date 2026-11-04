@@ -29,7 +29,7 @@ internal sealed partial class InstanceContentView
         var lifetime=new CancellationTokenSource(); _componentCancellation=lifetime;
         var panel=new StackPanel {Margin=new Thickness(8)};_body.Content=new ScrollViewer {Content=panel,VerticalScrollBarVisibility=ScrollBarVisibility.Auto};
         panel.Children.Add(Label("可选原理图预览扩展",20));
-        panel.Children.Add(Label("使用 LitematicaPreview 原生 GPU 预览。扩展独立下载和更新，由你选择是否安装；材质需从本地选择完整 Java 资源包。",14));
+        panel.Children.Add(Label("使用 LitematicaPreview 原生 GPU 预览。扩展独立下载和更新，由你选择是否安装。扩展 0.2.3 起自带基础材质，可叠加多个自定义资源包。",14));
         var details=Label("",14);panel.Children.Add(details);
         panel.Children.Add(Label("来源：csumcl.mcapcs.cn / components/schematic-preview",12));
         var buttons=new WrapPanel();panel.Children.Add(buttons);
@@ -92,7 +92,8 @@ internal sealed partial class InstanceContentView
         if (Closed) return;
         try { SchematicPreviewSession.ResolveInstalled(); path = _files.Folder(path); }
         catch (Exception ex) { ShowSchematicExtension(); _status.Text = ex.Message; return; }
-        if (_previewPack == null || !File.Exists(_previewPack))
+        bool stack=SchematicPreviewMaterials.SupportsStack;
+        if (!stack && (_previewPack == null || !File.Exists(_previewPack)))
         {
             var dialog = new OpenFileDialog { Title = "选择本地 Minecraft Java 完整资源包（扩展不附带材质）", Filter = "Minecraft Java 资源包 (*.zip)|*.zip" };
             if (dialog.ShowDialog(Window.GetWindow(this)) != true) return;
@@ -106,7 +107,7 @@ internal sealed partial class InstanceContentView
         panel.Children.Add(Label(Path.GetFileName(path), 18));
         var actions = new WrapPanel(); Grid.SetRow(actions, 1); panel.Children.Add(actions);
         actions.Children.Add(Button("← 返回原理图", () => { StopSchematicPreview(); _generation++; ShowSchematics(); _status.Text = ""; }));
-        actions.Children.Add(Button("更换资源包", () => { _previewPack = null; OpenSchematicPreview(path); }));
+        actions.Children.Add(stack?Button("材质包",()=>ShowSchematicMaterials(path)):Button("更换资源包", () => { _previewPack = null; OpenSchematicPreview(path); }));
         var camera = new WrapPanel { IsEnabled = false }; actions.Children.Add(camera);
         var viewport = new SchematicPreviewHost { Margin = new Thickness(4) }; _previewViewport = viewport;
         Grid.SetRow(viewport, 2); panel.Children.Add(viewport);
@@ -141,7 +142,8 @@ internal sealed partial class InstanceContentView
         try
         {
             IntPtr parent = await viewport.WaitForHandleAsync(cancellation.Token);
-            var session = await SchematicPreviewSession.OpenAsync(path, _previewPack!, parent, cancellation.Token);
+            var packs=stack?await Task.Run(()=>SchematicPreviewMaterials.Enabled(),cancellation.Token):null;
+            var session = await SchematicPreviewSession.OpenAsync(path, stack?"":_previewPack!, parent, cancellation.Token,packs:packs);
             if (Closed || generation != _generation || cancellation.IsCancellationRequested) { session.Dispose(); return; }
             _schematicPreview = session;
             session.Failed += message => Dispatcher.BeginInvoke(new Action(() => {
@@ -150,7 +152,7 @@ internal sealed partial class InstanceContentView
                 }
             }));
             camera.IsEnabled = true; Resize();
-            _status.Text = session.Summary + " · 原生 GPU · 拖动旋转 · Shift 拖动平移 · 滚轮缩放 · 方向键/Home";
+            _status.Text = session.Summary + (stack?$" · 基础材质 + {packs!.Count} 个自定义包":"") + " · 原生 GPU · 拖动旋转 · Shift 拖动平移 · 滚轮缩放 · 方向键/Home";
         }
         catch (OperationCanceledException) { }
         catch (Exception ex) { if (!Closed && generation == _generation) { _status.Text = "预览失败：" + ex.Message; StopSchematicPreview(); } }

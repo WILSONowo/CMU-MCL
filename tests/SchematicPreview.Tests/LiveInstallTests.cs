@@ -20,7 +20,9 @@ internal static partial class Program
         app.Dispatcher.BeginInvoke(new Action(async()=>{try {
             SchematicPreviewSession.RootOverride=null;SchematicPreviewSession.VerificationKeyOverride=null;
             var assembly=typeof(InstanceContentView).Assembly;
-            Check(assembly.GetName().Version==new Version(0,3,48,13),"acceptance loads published fixed client 0.3.48.13");
+            var expectedClient=args.Length>4?Version.Parse(args[4]):new Version(0,3,48,14);
+            string expectedComponent=args.Length>5?args[5]:"0.2.3";
+            Check(assembly.GetName().Version==expectedClient,"acceptance loads intended published client "+expectedClient);
             string root=SchematicPreviewSession.ComponentRoot;
             SchematicPreviewSession.CheckRegularPath(root);
             Check(true,"real component location resolves migrated launcher data root");
@@ -38,14 +40,14 @@ internal static partial class Program
                 var clock=Stopwatch.StartNew();
                 while(!check.IsEnabled&&clock.ElapsedMilliseconds<35000) await Task.Delay(100);
                 Check(panel.Children.OfType<TextBlock>().Any(t=>t.Text.Contains("在线版本：")),"published manager verifies live signed extension feed: "+status.Text);
-                bool installNeeded=SchematicPreviewSession.InstalledVersion()!="0.2.2";
+                bool installNeeded=SchematicPreviewSession.InstalledVersion()!=expectedComponent;
                 Check(install.IsEnabled==installNeeded,"real migrated-data page enables install when extension is missing");
                 if(installNeeded) {
                     install.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));clock.Restart();
                     while(!check.IsEnabled&&clock.ElapsedMilliseconds<300000) await Task.Delay(100);
                     Check(confirmations==1&&status.Text.Contains("安装完成"),"real install button downloads and activates extension: "+status.Text);
                 }
-                Check(SchematicPreviewSession.InstalledVersion()=="0.2.2","real storage has active extension 0.2.2");
+                Check(SchematicPreviewSession.InstalledVersion()==expectedComponent,"real storage has active extension "+expectedComponent);
                 string worker=SchematicPreviewSession.ResolveInstalled();
                 Check(File.Exists(Path.Combine(Path.GetDirectoryName(worker)!,"signed-feed.json")),"real worker resolves with pinned signature receipt and verified entry hash");
                 Check(!install.IsEnabled,"installed current version is shown without offering another install");

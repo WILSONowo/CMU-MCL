@@ -3,8 +3,8 @@ param(
     [Parameter(Mandatory=$true)][string]$UpstreamDirectory,
     [Parameter(Mandatory=$true)][string]$PrivateKeyPath,
     [Parameter(Mandatory=$true)][string]$OutputDirectory,
-    [string]$MinLauncherVersion='0.3.48.12',
-    [string]$Notes='可选原理图原生 GPU 预览扩展；材质需从本地选择。'
+    [string]$MinLauncherVersion='0.3.48.13',
+    [string]$Notes='内置基础材质，支持多资源包优先级和缺失资源回退；客户端 0.3.48.14 起提供材质管理。'
 )
 $ErrorActionPreference='Stop'
 $repo=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
@@ -36,7 +36,7 @@ try {
     $workerSource=Join-Path $repo 'components/schematic-preview'
     $sourceWorker=Join-Path $source 'components/schematic-preview';$sourceScripts=Join-Path $source 'scripts';New-Item -ItemType Directory -Force -Path $sourceWorker,$sourceScripts | Out-Null
     foreach($name in @('Cargo.toml','Cargo.lock','SOURCE.txt')){Copy-Item -LiteralPath (Join-Path $workerSource $name) -Destination $sourceWorker}
-    foreach($name in @('src','upstream')){Copy-Item -LiteralPath (Join-Path $workerSource $name) -Destination $sourceWorker -Recurse}
+    foreach($name in @('src','upstream','resources')){Copy-Item -LiteralPath (Join-Path $workerSource $name) -Destination $sourceWorker -Recurse}
     Copy-Item -LiteralPath (Join-Path $repo 'scripts/build-schematic-preview.ps1') -Destination (Join-Path $sourceScripts 'build-schematic-preview.ps1')
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     [IO.Compression.ZipFile]::CreateFromDirectory($source,(Join-Path $stage 'Source.zip'))

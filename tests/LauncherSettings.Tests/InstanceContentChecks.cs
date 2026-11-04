@@ -70,6 +70,17 @@ internal static partial class Program
         foreach(var theme in new[]{LauncherTheme.Light,LauncherTheme.Dark}){settings.Theme=theme;await CMUmcl.Appearance.AppearanceManager.ApplyAsync(settings);CMUmcl.Appearance.DpiWindowBehavior.Fit(window,960,500);window.Width=960;window.Height=500;window.UpdateLayout();await Task.Delay(30);Check(Descendants(view).OfType<ScrollViewer>().Any(x=>x.ViewportHeight>=48),"content: resource list retains visible viewport in compact "+theme);Capture("compact-mods-"+theme);}
         settings.Theme=LauncherTheme.Light;await CMUmcl.Appearance.AppearanceManager.ApplyAsync(settings);CMUmcl.Appearance.DpiWindowBehavior.Fit(window,1920,1000);window.Width=1200;window.Height=800;window.UpdateLayout();
         nav.SelectedIndex=2;await Task.Delay(150);window.UpdateLayout();Check(Descendants(view).OfType<Image>().Count(x=>x.Visibility==Visibility.Visible&&x.Source!=null)==2,"content: resource pack rows display embedded covers");Capture("resource-pack-covers");
+        nav.SelectedIndex=3;await Task.Delay(100);window.UpdateLayout();
+        Directory.CreateDirectory(SchematicPreviewSession.ComponentRoot);File.WriteAllText(Path.Combine(SchematicPreviewSession.ComponentRoot,"current.json"),"{\"version\":\"0.2.3\"}");
+        string materialA=Path.Combine(_output,"原版增强示例.zip"),materialB=Path.Combine(_output,"玻璃透明示例.zip");
+        Archive(materialA,"pack.mcmeta","{\"pack\":{\"pack_format\":71,\"description\":\"A\"}}");Archive(materialB,"pack.mcmeta","{\"pack\":{\"pack_format\":71,\"description\":\"B\"}}");
+        SchematicPreviewMaterials.Import(new[]{materialA,materialB});SchematicPreviewMaterials.Change(SchematicPreviewSession.Hash(materialB),enabled:false);
+        B(view,"预览材质").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));window.UpdateLayout();
+        Check(B(view,"导入资源包").IsEnabled,"content: material manager enables imports with supported component");
+        Check(Descendants(view).OfType<TextBlock>().Any(t=>t.Text.Contains("内置基础材质")),"content: material manager displays bundled fallback");
+        Check(Descendants(view).OfType<CheckBox>().Count()==2,"content: material manager displays enabled and disabled imported packs");
+        foreach(var theme in new[]{LauncherTheme.Light,LauncherTheme.Dark}){settings.Theme=theme;await CMUmcl.Appearance.AppearanceManager.ApplyAsync(settings);window.UpdateLayout();Capture("preview-materials-"+theme);}
+        B(view,"← 返回原理图").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));window.UpdateLayout();
         B(view,"← 返回").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));Check(view.Closed&&!host.IsVisible,"content: back returns to instance list");
         // Guard tested with the actual button path, without starting a game.
         bool busy=true;var guarded=new InstanceContentView(directory,directory,"占用测试",()=>busy,(_,_)=>Task.FromResult(true));guarded.LoadModIconOverride=_=>Task.FromResult<System.Windows.Media.Imaging.BitmapSource?>(null);host.Content=guarded;host.Visibility=Visibility.Visible;window.UpdateLayout();nav=Descendants(guarded).OfType<ListBox>().Single();nav.SelectedIndex=2;await Task.Delay(100);window.UpdateLayout();

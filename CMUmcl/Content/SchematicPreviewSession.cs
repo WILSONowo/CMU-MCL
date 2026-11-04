@@ -36,7 +36,7 @@ internal sealed class SchematicPreviewSession : IDisposable
     internal double DpiScale { get; private set; }
     internal bool SurfaceVisible { get; private set; }
 
-    private SchematicPreviewSession(string executable, string input, string pack, IntPtr parent, int? meshThreads)
+    private SchematicPreviewSession(string executable, string input, string pack, IntPtr parent, int? meshThreads, IReadOnlyList<SchematicPreviewPack>? packs)
     {
         _temporary = Path.Combine(Path.GetTempPath(), "CMUmcl-preview-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_temporary);
@@ -44,9 +44,19 @@ internal sealed class SchematicPreviewSession : IDisposable
         try
         {
             CopyInput(input, Path.Combine(_temporary, "input.litematic"), 64L * 1024 * 1024);
-            CopyInput(pack, Path.Combine(_temporary, "pack.zip"), 256L * 1024 * 1024);
+            if(!string.IsNullOrEmpty(pack))CopyInput(pack, Path.Combine(_temporary, "pack.zip"), 256L * 1024 * 1024);
             string request = Path.Combine(_temporary, "request.json");
-            var payload = new Dictionary<string,object> { ["input"]=Path.Combine(_temporary,"input.litematic"), ["pack"]=Path.Combine(_temporary,"pack.zip"), ["parent"]=parent.ToInt64(), ["parent_process"]=Process.GetCurrentProcess().Id };
+            var payload = new Dictionary<string,object> { ["input"]=Path.Combine(_temporary,"input.litematic"), ["pack"]=string.IsNullOrEmpty(pack)?"":Path.Combine(_temporary,"pack.zip"), ["parent"]=parent.ToInt64(), ["parent_process"]=Process.GetCurrentProcess().Id };
+            if(packs!=null) {
+                if(packs.Count>16||!string.IsNullOrEmpty(pack))throw new IOException("材质包请求无效。");
+                var copied=new List<object>();long total=0;
+                for(int i=0;i<packs.Count;i++) {
+                    total=checked(total+new FileInfo(packs[i].Path).Length);if(total>256L*1024*1024)throw new IOException("自定义材质包合计超过 256 MiB。");
+                    string path=Path.Combine(_temporary,$"pack-{i}.zip");CopyInput(packs[i].Path,path,256L*1024*1024);
+                    copied.Add(new{name=packs[i].Name,path});
+                }
+                payload["packs"]=copied;
+            }
             if(meshThreads.HasValue) payload["threads"]=meshThreads.Value;
             File.WriteAllText(request,JsonSerializer.Serialize(payload),new UTF8Encoding(false));
             var start = new ProcessStartInfo(executable, "\"" + request + "\"") { UseShellExecute = false, CreateNoWindow = true, RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true, WorkingDirectory = _temporary, StandardOutputEncoding = Encoding.UTF8, StandardErrorEncoding = Encoding.UTF8 };
@@ -63,11 +73,11 @@ internal sealed class SchematicPreviewSession : IDisposable
         catch { Dispose(); throw; }
     }
 
-    internal static async Task<SchematicPreviewSession> OpenAsync(string input, string pack, IntPtr parent, CancellationToken cancellation, int timeoutMilliseconds = 100000, int? meshThreads = null)
+    internal static async Task<SchematicPreviewSession> OpenAsync(string input, string pack, IntPtr parent, CancellationToken cancellation, int timeoutMilliseconds = 100000, int? meshThreads = null, IReadOnlyList<SchematicPreviewPack>? packs = null)
     {
         string executable = ResolveInstalled();
         cancellation.ThrowIfCancellationRequested();
-        var session = await Task.Run(() => new SchematicPreviewSession(executable, input, pack, parent, meshThreads));
+        var session = await Task.Run(() => new SchematicPreviewSession(executable, input, pack, parent, meshThreads, packs));
         try { await session.Wait(session._pending!.Task, cancellation, timeoutMilliseconds); cancellation.ThrowIfCancellationRequested(); return session; }
         catch { session.Dispose(); await session.CleanupTask; throw; }
     }

@@ -412,6 +412,7 @@ fn event_loop(
     let load_request = Request {
         input: request.input.clone(),
         pack: request.pack.clone(),
+        packs: request.packs.clone(),
         parent: request.parent,
         parent_process: request.parent_process,
         threads: request.threads,
