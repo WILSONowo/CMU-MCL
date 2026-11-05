@@ -114,6 +114,7 @@ namespace CMUmcl
             Closed += (_, _) =>
             {
                 _windowClosed = true;
+                _globalSettingsInline?.Close();
                 CancelInlinePrompt();CloseEmbeddedUiForNavigation();
                 foreach(var request in _launchRequests.Values.ToArray())request.Cancel();
                 foreach(var editor in _settingsWindows.Values.ToArray())editor.Close();
@@ -431,12 +432,13 @@ namespace CMUmcl
         private void ShowSettingsView()
         {
             CloseEmbeddedUiForNavigation();
+            EnsureInlineGameSettings();
             _currentPage = MainPage.Settings;
             UpdateNavStyles();
 
             HeaderTitleText.Text = "设置";
             HeaderStatusText.Text = "启动器设置";
-            if (!_javaScanStarted) _ = ScanJavaAsync();
+            // The shared game settings editor scans Java on request.
             UpdateMemoryPreview();
             RefreshButton.Visibility = Visibility.Collapsed;
             NewInstanceButton.Visibility = Visibility.Collapsed;
@@ -459,7 +461,7 @@ namespace CMUmcl
             UpdateNavStyles();
 
             HeaderTitleText.Text = "社区资源";
-            HeaderStatusText.Text = "搜索并安装 Mod / 整合包 / 数据包 / 资源包 / 光影包";
+            HeaderStatusText.Text = "";
             NewInstanceButton.Visibility = Visibility.Collapsed;
             RefreshButton.Visibility = Visibility.Visible;
 
@@ -768,7 +770,7 @@ namespace CMUmcl
                 vm.LaunchFail("无法检查整合包更新，未启动。");
                 LauncherPrompt.Show(
                     this,
-                    "无法检查整合包更新（资源站不可用或整合包已下架），已取消启动，避免运行过旧版本。\n\n如要离线启动已安装版本，请在设置中关闭“启动前自动更新整合包”。",
+                    "无法检查整合包更新，已取消启动。\n要启动已安装版本，请关闭设置中的“启动前自动更新整合包”。",
                     "自动更新失败",
                     MessageBoxButton.OK,
                     MessageBoxImage.Warning);
@@ -879,7 +881,7 @@ namespace CMUmcl
 
             try
             {
-                OpenInstanceContent(vm);
+                OpenInstanceDirectories(vm);
             }
             catch (Exception ex)
             {
@@ -1004,7 +1006,7 @@ namespace CMUmcl
 
             IsolationHintText.Text = IsolationComboBox.SelectedIndex switch
             {
-                0 => "所有实例共用同一个游戏目录（%LOCALAPPDATA%\\CMUmcl\\game）。",
+                0 => "所有实例共用游戏目录。",
                 2 => "每个实例使用各自的独立目录。",
                 _ => "仅模组实例使用独立目录；原版实例共用游戏目录。",
             };

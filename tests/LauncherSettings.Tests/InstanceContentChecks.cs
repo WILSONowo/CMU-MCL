@@ -39,10 +39,16 @@ internal static partial class Program
         string sync=files.Folder("schematics/sync/sub");Directory.CreateDirectory(sync);File.WriteAllText(Path.Combine(sync,"nested.litematic"),"fixture");File.WriteAllText(files.Folder("schematics/root.litematic"),"fixture");File.WriteAllText(files.Folder("schematics/hidden.txt"),"ignore");
         Click(window,"InstancesNavButton");window.UpdateLayout();var card=Get<ItemsControl>(window,"InstancesList").Items.OfType<InstanceCardViewModel>().Single(x=>x.InstanceId==metadata.Id);
         int count=Application.Current.Windows.Count;var host=Get<ContentControl>(window,"InstanceSettingsHost");
-        InstanceContentView Open(){Call(window,"OpenInstanceDirButton_Click",new Button{DataContext=card},new RoutedEventArgs());window.UpdateLayout();var opened=(InstanceContentView)host.Content;opened.LoadModIconOverride=_=>Task.FromResult<System.Windows.Media.Imaging.BitmapSource?>(null);opened.PreviewUpdatesFactory=()=>new SchematicPreviewUpdateClient(new System.Net.Http.HttpClient(new FixtureHandler(Array.Empty<byte>(),Array.Empty<byte>())),SchematicPreviewProtocol.PublicKey);return opened;}
+        InstanceContentView Open(){Call(window,"OpenInstanceContent",card);window.UpdateLayout();var opened=(InstanceContentView)host.Content;opened.LoadModIconOverride=_=>Task.FromResult<System.Windows.Media.Imaging.BitmapSource?>(null);opened.PreviewUpdatesFactory=()=>new SchematicPreviewUpdateClient(new System.Net.Http.HttpClient(new FixtureHandler(Array.Empty<byte>(),Array.Empty<byte>())),SchematicPreviewProtocol.PublicKey);return opened;}
         Button B(DependencyObject root,string text)=>Descendants(root).OfType<Button>().Single(x=>Equals(x.Content,text));
         void Capture(string name){window.UpdateLayout();var bitmap=new System.Windows.Media.Imaging.RenderTargetBitmap((int)window.ActualWidth,(int)window.ActualHeight,96,96,PixelFormats.Pbgra32);bitmap.Render(window);var encoder=new System.Windows.Media.Imaging.PngBitmapEncoder();encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(bitmap));using var output=File.Create(Path.Combine(_output,name+".png"));encoder.Save(output);}
-        var view=Open();Check(Window.GetWindow(view)==window&&Application.Current.Windows.Count==count,"content: directory action embeds content page without another window");
+        Call(window,"OpenInstanceDirButton_Click",new Button{DataContext=card},new RoutedEventArgs());window.UpdateLayout();
+        var directories=(InstanceContentView)host.Content;
+        Check(!Descendants(directories).OfType<ListBox>().Any(x=>x.IsVisible) && Descendants(directories).OfType<Button>().Count(x=>x.Tag is string)==6,"content: card directory action shows full-width folder cards without category navigation");
+        Capture("directory-cards");
+        B(directories,"← 返回").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Check(directories.Closed&&!host.IsVisible,"content: directory back returns to instances");
+        var view=Open();Check(Window.GetWindow(view)==window&&Application.Current.Windows.Count==count,"content: resource manager embeds without another window");
         Check(Descendants(view).OfType<Button>().Count(x=>x.Content is string s&&s.EndsWith("文件夹"))==6,"content: six folder shortcuts");
         var nav=Descendants(view).OfType<ListBox>().Single();nav.SelectedIndex=1;await Task.Delay(200);window.UpdateLayout();
         Check(Descendants(view).OfType<TextBlock>().Any(x=>x.Text=="Alpha 模组"),"content: mods load automatically on entry");

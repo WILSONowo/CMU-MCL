@@ -9,6 +9,17 @@ namespace CMUmcl;
 
 public partial class MainWindow
 {
+    private InstanceSettingsView? _globalSettingsInline;
+    private void EnsureInlineGameSettings()
+    {
+        if(_globalSettingsInline==null)
+        {
+            _globalSettingsInline=new InstanceSettingsView(LauncherPaths.InstancesDirectory,"全局游戏设置",_settingsStore,true,inlineGlobal:true);
+            _globalSettingsInline.SettingsApplied+=RefreshAfterInstanceSettings;
+            GameDefaultsCard.Content=_globalSettingsInline;
+        }
+        else _globalSettingsInline.RefreshGlobalIfUnchanged();
+    }
     private bool _loadingPreferences, _syncMemory, _scanningJava;
     private bool _javaScanStarted;
     private int _javaProbeGeneration;
@@ -36,8 +47,9 @@ public partial class MainWindow
     {
         if (sender is not Button button) return;
         string tab = button.Name switch { "AppearanceTab" => "Appearance", "ProxyTab" => "Proxy", "StorageTab" => "Storage", "UpdateTab" => "Update", _ => "Runtime" };
+        if(tab=="Runtime")EnsureInlineGameSettings();
         foreach (var (element, group) in new (FrameworkElement, string)[] {
-            (JavaCard,"Runtime"),(MemoryCard,"Runtime"),(AppearanceCard,"Appearance"),
+            (GameDefaultsCard,"Runtime"),(AppearanceCard,"Appearance"),
             (IsolationCard,"Storage"),(DirectoryCard,"Storage"),(InstanceDirectoryCard,"Storage"),
             (PackUpdateCard,"Update"),(LauncherUpdateCard,"Update"),(ProxyCard,"Proxy") })
             element.Visibility = group == tab ? Visibility.Visible : Visibility.Collapsed;
@@ -60,11 +72,11 @@ public partial class MainWindow
             if (_windowClosed) return;
             JavaCandidatesCombo.ItemsSource = found.OrderByDescending(j => j.Major).ThenByDescending(j => j.Bits).ToArray();
             JavaScanStatus.Text = found.Count == 0
-                ? "未发现本机 Java；自动模式会在启动时尝试下载游戏指定的官方运行时。"
-                : $"找到 {found.Count} 个运行时 · 选择后可查看完整路径";
+                ? "未检测到 Java，启动时将自动下载。"
+                : $"找到 {found.Count} 个 Java";
         }
         catch (OperationCanceledException) { }
-        catch { if (!_windowClosed) JavaScanStatus.Text = "检测未完成。可以重试，或浏览本机 Java 路径。"; }
+        catch { if (!_windowClosed) JavaScanStatus.Text = "检测失败，请重试或手动选择 Java。"; }
         finally { _scanningJava = false; if (!_windowClosed) ScanJavaButton.IsEnabled = true; }
     }
 
@@ -83,7 +95,7 @@ public partial class MainWindow
         _detectedJava = null;
         if (JavaManualRadio.IsChecked != true)
         {
-            JavaDetectedText.Text = "启动时优先选择匹配主版本的本机 Java；缺少时下载官方运行时。";
+            JavaDetectedText.Text = "自动选择 Java，缺少时下载。";
             UpdateMemoryPreview();
             return;
         }
@@ -156,7 +168,7 @@ public partial class MainWindow
             SystemMemoryText.Text = memory.TotalMb > 0 ? $"已使用 {(memory.TotalMb - memory.AvailableMb) / 1024.0:F1} GiB / 总内存 {memory.TotalMb / 1024.0:F1} GiB" : "暂时无法读取系统内存";
             MemoryUsageBar.Value = memory.TotalMb > 0 ? Compat.Clamp(displayed * 100.0 / memory.TotalMb, 0, 100) : 0;
             MemoryAdviceText.Text = automatic
-                ? $"游戏分配 {recommended / 1024.0:F1} GiB；启动时根据可用内存重新计算。"
+                ? $"预计分配 {recommended / 1024.0:F1} GiB"
                 : $"游戏分配 {displayed / 1024.0:F1} GiB。";
             if (automatic && recommended < 1024) MemoryAdviceText.Text += " 可用内存偏低，建议关闭其他程序。";
             if (!automatic && memory.AvailableMb > 0 && displayed > memory.AvailableMb - 768)

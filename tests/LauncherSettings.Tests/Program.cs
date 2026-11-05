@@ -129,6 +129,8 @@ internal static partial class Program
         Check(fixtureCards.Any(c=>c.IsRequired),"server required flag is exposed by the card view model");
         Check(Descendants(Get<ItemsControl>(window,"CardsList")).OfType<TextBlock>().Any(x=>x.Text=="\u5FC5\u9700"),"required chip is rendered in the pack card");
         await LauncherUpdatePopupChecks(window);
+        if(preview && Environment.GetCommandLineArgs().Contains("--instance-pages"))
+        { ShowInstancePagesPreview(window,installed,store);return; }
         if(Environment.GetCommandLineArgs().Contains("--local-mod-icons")){await LocalModIconChecks(Path.GetFullPath(Environment.GetCommandLineArgs()[1]));window.Close();return;}
         if(Environment.GetCommandLineArgs().Contains("--folder-import")){await FolderImportChecks(installed);window.Close();return;}
         if(Environment.GetCommandLineArgs().Contains("--instance-content")){await InstanceContentChecks(window,installed,store);window.Close();return;}

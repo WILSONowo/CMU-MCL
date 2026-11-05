@@ -24,6 +24,10 @@ public partial class MainWindow
     private InstanceSettingsView? _instanceEditor,_parentEditor;
     private InstanceContentView? _instanceContent;
     private void OpenInstanceContent(InstanceCardViewModel card)
+        =>ShowInstanceContent(card,false);
+    private void OpenInstanceDirectories(InstanceCardViewModel card)
+        =>ShowInstanceContent(card,true);
+    private void ShowInstanceContent(InstanceCardViewModel card,bool directoriesOnly)
     {
         CloseCreateInstanceView();CloseEmbeddedUiForNavigation();
         var metadata=InstanceMaintenance.Read(card.InstallPath);
@@ -31,10 +35,10 @@ public partial class MainWindow
         _instanceContent=new InstanceContentView(card.InstallPath,gameDirectory,card.DisplayName,
             ()=>IsInstanceBusy(card) || !CanInstallPack(card.InstanceId)
                 || (gameDirectory!=card.InstallPath && (_gameProcesses.Count!=0 || _launchRequests.Count!=0 || _activeOperations!=0 || CreateInstanceView.HasActiveOperation || _settingsWindows.Values.Any(x=>x.MaintenanceBusy))),
-            async (title,message)=>await ShowInlinePromptAsync(title,message)==InlineChoice.Continue);
+            async (title,message)=>await ShowInlinePromptAsync(title,message)==InlineChoice.Continue,directoriesOnly:directoriesOnly);
         _instanceContent.BackRequested+=ShowInstancesView;
         _currentPage=MainPage.InstanceContent;UpdateNavStyles();
-        HeaderTitleText.Text="实例内容";HeaderStatusText.Text=card.DisplayName;
+        HeaderTitleText.Text=directoriesOnly?"实例目录":"实例内容";HeaderStatusText.Text=card.DisplayName;
         NewInstanceButton.Visibility=RefreshButton.Visibility=Visibility.Collapsed;
         CardsScroll.Visibility=EmptyStateText.Visibility=LoadingState.Visibility=ErrorState.Visibility=InstancesScroll.Visibility=InstancesEmptyStateText.Visibility=SettingsScroll.Visibility=CommunityResourceView.Visibility=Visibility.Collapsed;
         InstanceSettingsHost.Content=_instanceContent;InstanceSettingsHost.Visibility=Visibility.Visible;
@@ -49,7 +53,7 @@ public partial class MainWindow
         var editor = new InstanceSettingsView(card.InstallPath,card.DisplayName,_settingsStore,launch:_launchService)
         {
             IsOperationBlocked=()=>IsInstanceBusy(card),
-            IsMaintenanceBlocked=()=>_gameProcesses.Count!=0 || _activeOperations!=0 || CreateInstanceView.HasActiveOperation || _settingsWindows.Values.Any(x=>x.MaintenanceBusy),
+            IsMaintenanceBlocked=()=>_gameProcesses.Count!=0 || _launchRequests.Count!=0 || _activeOperations!=0 || CreateInstanceView.HasActiveOperation || _settingsWindows.Values.Any(x=>x.MaintenanceBusy),
         };
         _settingsWindows.Add(card.InstanceId,editor);
         editor.OperationFinished+=(_,_)=>{if(editor.IsClosed)_settingsWindows.Remove(card.InstanceId);};
@@ -69,7 +73,7 @@ public partial class MainWindow
         editor.ConfirmAsync=async (message,title)=>await ShowInlinePromptAsync(title,message)==InlineChoice.Continue;
         editor.BackRequested-=EditorBackRequested;editor.BackRequested+=EditorBackRequested;
         _currentPage=MainPage.InstanceSettings;UpdateNavStyles();
-        HeaderTitleText.Text="实例设置";HeaderStatusText.Text=editor.Title;
+        HeaderTitleText.Text=editor.IsGlobal?"游戏默认设置":"实例管理";HeaderStatusText.Text=editor.Title;
         NewInstanceButton.Visibility=RefreshButton.Visibility=Visibility.Collapsed;
         CardsScroll.Visibility=EmptyStateText.Visibility=LoadingState.Visibility=ErrorState.Visibility=InstancesScroll.Visibility=InstancesEmptyStateText.Visibility=SettingsScroll.Visibility=CommunityResourceView.Visibility=Visibility.Collapsed;
         InstanceSettingsHost.Content=editor;InstanceSettingsHost.Visibility=Visibility.Visible;
@@ -80,7 +84,7 @@ public partial class MainWindow
         var editor=_instanceEditor;if(editor==null)return;
         if(editor.HasUnsavedChanges)
         {
-            var choice=await ShowInlinePromptAsync("保存实例设置","有尚未保存的修改，是否保存后返回？","保存",true);
+            var choice=await ShowInlinePromptAsync(editor.IsGlobal?"保存游戏默认设置":"保存实例设置","有尚未保存的修改，是否保存后返回？","保存",true);
             if(!ReferenceEquals(editor,_instanceEditor) || editor.IsClosed || choice==InlineChoice.Cancel)return;
             if(choice==InlineChoice.Continue){editor.SaveAndClose();return;}
         }
