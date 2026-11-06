@@ -157,17 +157,25 @@ internal static partial class Program
             authStore,client,installer,installed,launch,new SettingsStore(),new LocalInstanceService(installed),
             new LauncherUpdateClient(new HttpClient(new FixtureHandler([],[])),Compat.ExportPem((ECDsaCng)key)), CreateCommunityFixture(installed));
         Check(File.ReadAllText(LauncherPaths.SettingsPath)==savedJson && Get<ComboBox>(reloaded,"ThemeCombo").SelectedIndex==(int)LauncherTheme.Dark
-            && Get<TextBox>(reloaded,"MemoryTextBox").Text=="3072" && Get<CheckBox>(reloaded,"AutoUpdatePacksCheck").IsChecked==false,
+            && Get<CheckBox>(reloaded,"AutoUpdatePacksCheck").IsChecked==false,
             "new window restores saved settings without writing during initialization");
         reloaded.Close();
         await BackgroundChecks();
         await ActivityChecks(window, store);
-        string closingJava = CreateJavaFixture("closing-java", "21.0.6", "x64");
-        Get<RadioButton>(window,"JavaManualRadio").IsChecked=true;
-        Get<TextBox>(window,"JavaPathTextBox").Text=closingJava;
+        Click(window,"SettingsNavButton");Click(window,"RuntimeTab");
+        var defaults=(InstanceSettingsView)Get<ContentControl>(window,"GameDefaultsCard").Content;
+        ((TextBox)typeof(InstanceSettingsView).GetField("_width",BindingFlags.NonPublic|BindingFlags.Instance)!.GetValue(defaults)!).Text="1500";
+        Click(window,"PacksNavButton");
         window.Close();
+        await Until(() => Get<Grid>(window,"InlinePromptOverlay").IsVisible);
+        Check(window.IsVisible && Get<FrameworkElement>(window,"SettingsScroll").IsVisible && store.Load().WindowWidth!=1500,"closing with unsaved game defaults asks before exit");
+        Click(window,"InlinePromptCancel");await Task.Delay(50);
+        Check(window.IsVisible && defaults.HasUnsavedChanges,"cancelling the close prompt keeps the window and edits");
+        window.Close();
+        await Until(() => Get<Grid>(window,"InlinePromptOverlay").IsVisible);
+        Click(window,"InlinePromptContinue");
         await Until(() => !window.IsVisible);
-        Check(store.Load().JavaPath==closingJava,"closing flushes pending valid Java detection");
+        Check(store.Load().WindowWidth==1500,"closing can save pending game defaults");
         File.WriteAllText(Path.Combine(_output,"result.txt"), $"PASS {_checks} checks");
         Console.WriteLine($"PASS {_checks} launcher settings checks; artifacts: {_output}");
     }

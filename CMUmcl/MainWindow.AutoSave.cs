@@ -10,7 +10,7 @@ namespace CMUmcl;
 
 public partial class MainWindow
 {
-    private bool _preferencesReady, _closingAfterFlush, _flushingJava;
+    private bool _preferencesReady, _closingAfterFlush, _confirmingClose;
     private AppSettings? _unsavedSettings;
     private static AppSettings CopySettings(AppSettings value) => JsonSerializer.Deserialize<AppSettings>(JsonSerializer.Serialize(value))!;
 
@@ -40,37 +40,34 @@ public partial class MainWindow
     private void AutoUpdatePacks_Changed(object sender, RoutedEventArgs e)
         => SavePreference(s => s.AutoUpdatePacks = AutoUpdatePacksCheck.IsChecked == true);
 
-    private void SaveMemoryPreference()
-    {
-        if (!_preferencesReady || _loadingPreferences || _syncMemory) return;
-        if (MemoryAutoRadio.IsChecked == true)
-        {
-            ShowMemoryError(null);
-            SavePreference(s => s.AutoMemory = true);
-            return;
-        }
-        if (!int.TryParse(MemoryTextBox.Text, out int mb)) { ShowMemoryError("请输入有效的内存大小。"); return; }
-        string? error = MemoryAllocation.ValidateManual(mb, MemorySnapshot.Read(), _detectedJava?.Bits ?? 64);
-        ShowMemoryError(error);
-        if (error == null) SavePreference(s => { s.AutoMemory = false; s.MaxMemoryMb = mb; });
-    }
-
     private async void Preferences_Closing(object? sender, CancelEventArgs e)
     {
         if (_migrating) { e.Cancel = true; return; }
-        if (_flushingJava) { e.Cancel = true; return; }
-        if (_closingAfterFlush || _updatingLauncher || !_preferencesReady || JavaManualRadio.IsChecked != true) return;
-        string path = JavaPathTextBox.Text.Trim();
-        if (path.Length == 0 || path == _settings.JavaPath) return;
+        if (_closingAfterFlush || _updatingLauncher || !_preferencesReady) return;
+        if (_globalSettingsInline?.HasUnsavedChanges != true) return;
         e.Cancel = true;
-        _flushingJava = true;
+        if (await ResolveUnsavedGameDefaultsAsync("退出")) { _closingAfterFlush = true; Close(); }
+    }
+
+    // Game defaults use an explicit save button, unlike the autosaved launcher preferences.
+    // Returns true when the caller may continue (nothing pending, saved, or discarded).
+    private async Task<bool> ResolveUnsavedGameDefaultsAsync(string action)
+    {
+        var editor = _globalSettingsInline;
+        if (editor == null || !editor.HasUnsavedChanges) return true;
+        if (_confirmingClose) return false;
+        _confirmingClose = true;
         try
         {
-            var java = await Task.Run(() => JavaLocator.DetectExecutable(path));
-            if (java is { Major: > 0, IsSupportedArchitecture: true }) SavePreference(s => s.JavaPath = java.JavaPath);
+            ShowSettingsView();
+            ShowSettingsTab(RuntimeTab);
+            var choice = await ShowInlinePromptAsync("保存游戏默认设置", $"全局游戏设置有尚未保存的修改，是否保存后{action}？", "保存", true);
+            if (_windowClosed || choice == InlineChoice.Cancel) return false;
+            if (choice == InlineChoice.Discard) return true;
+            editor.SaveAndClose();
+            return !editor.HasUnsavedChanges; // On a validation error the editor shows the reason.
         }
-        catch { /* An incomplete or inaccessible path must not prevent closing. */ }
-        finally { _flushingJava = false; _closingAfterFlush = true; Close(); }
+        finally { _confirmingClose = false; }
     }
 
     private async Task ChangeInstancesDirectoryAsync(string? directory)

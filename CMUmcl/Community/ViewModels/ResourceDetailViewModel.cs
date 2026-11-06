@@ -140,7 +140,7 @@ namespace CMUmcl.Community
         public bool IsLoadingDependencies { get => _isLoadingDependencies; private set { if (Set(ref _isLoadingDependencies, value)) OnPropertyChanged(nameof(CanInstall)); } }
         public bool HasDependencies => _loadDependency != null && SelectedVersion?.Dependencies.Count > 0;
         public string DependencyNotice => SelectedVersion?.Dependencies.Any(d => d.Kind == DependencyKind.Required) == true
-            ? "缺少的必需前置需另行安装。"
+            ? "安装按钮只安装当前模组；缺少的必需前置需另行安装。"
             : "相关资源";
         private string _dependencyError = "";
         public string DependencyError { get => _dependencyError; private set { if (Set(ref _dependencyError, value)) OnPropertyChanged(nameof(HasDependencyError)); } }

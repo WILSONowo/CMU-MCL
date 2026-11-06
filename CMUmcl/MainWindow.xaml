@@ -669,46 +669,6 @@
                     <StackPanel Margin="28,18" MaxWidth="900" HorizontalAlignment="Stretch">
 
                         <ContentControl x:Name="GameDefaultsCard" HorizontalContentAlignment="Stretch" />
-                        <!-- Retained controls provide the existing preference bindings during the local preview. -->
-                        <Border x:Name="JavaCard" Style="{StaticResource SettingsCard}" Visibility="Collapsed">
-                            <StackPanel>
-                                <StackPanel Orientation="Horizontal" Margin="0,0,0,14">
-                                    <TextBlock Text="&#xE756;" Style="{StaticResource SectionIcon}" />
-                                    <StackPanel>
-                                        <TextBlock Text="游戏 Java" Style="{StaticResource SectionHeader}" />
-                                    </StackPanel>
-                                </StackPanel>
-
-                                <WrapPanel>
-                                <RadioButton x:Name="JavaAutoRadio" Content="自动选择合适的 Java" GroupName="JavaMode" Checked="JavaMode_Checked" Margin="0,0,24,0" />
-                                <RadioButton x:Name="JavaManualRadio" Content="自定义" GroupName="JavaMode" Checked="JavaMode_Checked" />
-                                </WrapPanel>
-                                <Grid Margin="0,14,0,8">
-                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                                    <ComboBox x:Name="JavaCandidatesCombo" DisplayMemberPath="DisplayName" SelectionChanged="JavaCandidate_SelectionChanged" Margin="0,0,8,0" ToolTip="选择 Java 版本；启动时检查兼容性。" />
-                                    <TextBlock Text="选择 Java" Margin="12,0,36,0" VerticalAlignment="Center" IsHitTestVisible="False" Foreground="{DynamicResource MutedTextBrush}">
-                                        <TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Visibility" Value="Collapsed" /><Style.Triggers><DataTrigger Binding="{Binding SelectedIndex, ElementName=JavaCandidatesCombo}" Value="-1"><Setter Property="Visibility" Value="Visible" /></DataTrigger></Style.Triggers></Style></TextBlock.Style>
-                                    </TextBlock>
-                                    <Button x:Name="ScanJavaButton" Grid.Column="1" Content="刷新" Style="{StaticResource SecondaryButton}" Click="ScanJava_Click" />
-                                </Grid>
-                                <TextBlock x:Name="JavaScanStatus" Style="{StaticResource Caption}" Text="" />
-                                <Grid x:Name="JavaPathRow" Margin="0,12,0,0">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <TextBox x:Name="JavaPathTextBox" Grid.Column="0" Margin="0,0,8,0"
-                                             TextChanged="JavaPathTextBox_TextChanged" />
-                                    <Button x:Name="BrowseJavaButton" Grid.Column="1" Content="浏览…" MinWidth="80"
-                                            Style="{StaticResource SecondaryButton}"
-                                            Click="BrowseJavaButton_Click" />
-                                </Grid>
-                                <TextBlock x:Name="JavaDetectedText" FontSize="12" Foreground="{DynamicResource MutedTextBrush}"
-                                           Margin="0,10,0,0" TextWrapping="Wrap" />
-                                <TextBlock x:Name="JavaErrorText" FontSize="12" Foreground="{DynamicResource ErrorBrush}"
-                                           Margin="0,6,0,0" Visibility="Collapsed" TextWrapping="Wrap" />
-                            </StackPanel>
-                        </Border>
 
                         <Border x:Name="ProxyCard" Style="{StaticResource SettingsCard}" Visibility="Collapsed">
                             <StackPanel>
@@ -724,7 +684,7 @@
                                         <TextBlock Text="主机" Style="{StaticResource FieldLabel}" Margin="0,0,0,8" />
                                         <TextBlock Text="端口" Grid.Column="2" Style="{StaticResource FieldLabel}" Margin="0,0,0,8" />
                                         <TextBox x:Name="ProxyHostTextBox" Grid.Row="1" TextChanged="ProxyField_Changed" />
-                                        <TextBox x:Name="ProxyPortTextBox" Grid.Row="1" Grid.Column="2" TextChanged="ProxyField_Changed" PreviewTextInput="MemoryTextBox_PreviewTextInput" />
+                                        <TextBox x:Name="ProxyPortTextBox" Grid.Row="1" Grid.Column="2" TextChanged="ProxyField_Changed" PreviewTextInput="DigitsOnly_PreviewTextInput" />
                                     </Grid>
                                     <CheckBox x:Name="ProxyAuthenticationCheck" Content="身份验证" Margin="0,22,0,14" Checked="ProxyAuthentication_Changed" Unchecked="ProxyAuthentication_Changed" />
                                     <Grid x:Name="ProxyCredentialsPanel">
@@ -739,40 +699,6 @@
                                 <TextBlock x:Name="ProxyErrorText" Foreground="{DynamicResource ErrorBrush}" TextWrapping="Wrap" Margin="0,12,0,0" />
                             </StackPanel>
                         </Border>
-
-                        <!-- Memory -->
-                        <Border x:Name="MemoryCard" Style="{StaticResource SettingsCard}" Visibility="Collapsed">
-                            <StackPanel>
-                                <StackPanel Orientation="Horizontal" Margin="0,0,0,14">
-                                    <TextBlock Text="&#xE950;" Style="{StaticResource SectionIcon}" />
-                                    <StackPanel>
-                                        <TextBlock Text="游戏内存" Style="{StaticResource SectionHeader}" />
-                                    </StackPanel>
-                                </StackPanel>
-
-                                <StackPanel Orientation="Horizontal" Margin="0,0,0,16">
-                                    <RadioButton x:Name="MemoryAutoRadio" Content="自动分配内存" GroupName="MemoryMode" Checked="MemoryMode_Changed" />
-                                    <RadioButton x:Name="MemoryManualRadio" Content="手动选择内存" GroupName="MemoryMode" Checked="MemoryMode_Changed" Margin="24,0,0,0" />
-                                </StackPanel>
-                                <TextBlock x:Name="SystemMemoryText" FontSize="12" Foreground="{DynamicResource MutedTextBrush}" />
-                                <Grid Margin="0,10,0,0">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="Auto" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <TextBox x:Name="MemoryTextBox" Grid.Column="0" Width="140"
-                                             TextChanged="MemoryTextBox_Changed" PreviewTextInput="MemoryTextBox_PreviewTextInput" />
-                                    <TextBlock Grid.Column="1" Text="MiB" Foreground="{DynamicResource MutedTextBrush}"
-                                               FontSize="13" VerticalAlignment="Center" Margin="10,0,0,0" />
-                                </Grid>
-                                <Slider x:Name="MemorySlider" Minimum="512" Maximum="32768" TickFrequency="256" IsSnapToTickEnabled="True" Margin="0,16,0,10" ValueChanged="MemorySlider_Changed" />
-                                <ProgressBar x:Name="MemoryUsageBar" Height="8" Maximum="100" />
-                                <TextBlock x:Name="MemoryAdviceText" Style="{StaticResource FieldHint}" />
-                                <TextBlock x:Name="MemoryErrorText" FontSize="12" Foreground="{DynamicResource ErrorBrush}"
-                                           Margin="0,6,0,0" Visibility="Collapsed" TextWrapping="Wrap" />
-                            </StackPanel>
-                        </Border>
-
 
                         <Border x:Name="AppearanceCard" Style="{StaticResource SettingsCard}" Visibility="Collapsed">
                             <StackPanel>
@@ -824,7 +750,7 @@
                                     </WrapPanel>
                                     <Grid Margin="0,8,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="100" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                                         <TextBlock Text="切换间隔（秒）" VerticalAlignment="Center" Margin="0,0,12,0" />
-                                        <TextBox x:Name="BackgroundIntervalTextBox" Grid.Column="1" TextChanged="BackgroundInterval_Changed" PreviewTextInput="MemoryTextBox_PreviewTextInput" />
+                                        <TextBox x:Name="BackgroundIntervalTextBox" Grid.Column="1" TextChanged="BackgroundInterval_Changed" PreviewTextInput="DigitsOnly_PreviewTextInput" />
                                         <Button Grid.Column="3" Content="切换背景图片" Style="{StaticResource SecondaryButton}" Click="NextBackground_Click" />
                                     </Grid>
                                     <TextBlock x:Name="BackgroundIntervalError" Foreground="{DynamicResource ErrorBrush}" TextWrapping="Wrap" Margin="0,6,0,0" />

@@ -115,7 +115,16 @@ namespace CMUmcl
                 {
                     int memory=defaults.MaxMemoryMb;if(Own(_memoryOverride)&&!int.TryParse(_memory.Text,out memory))throw new InvalidDataException("请输入有效内存数值。");
                     var path=Own(_javaOverride)?_java.Text.Trim():defaults.JavaPath;
-                    if(Own(_javaOverride)&&!string.IsNullOrEmpty(path)&&JavaLocator.DetectExecutable(path)==null)throw new InvalidDataException("Java 路径无效或无法识别版本。");
+                    JavaInfo? detected=null;
+                    if(Own(_javaOverride)&&!string.IsNullOrEmpty(path))
+                    {
+                        detected=JavaLocator.DetectExecutable(path);
+                        if(detected is not {Major:>0})throw new InvalidDataException("Java 路径无效或无法识别版本。");
+                        if(!detected.IsSupportedArchitecture)throw new InvalidDataException("所选 Java 与本机架构不兼容，请更换运行时。");
+                        path=detected.JavaPath;
+                    }
+                    // Match the launch-time check so an impossible heap is rejected here, not when starting the game.
+                    if(Own(_memoryOverride)&&_auto.IsChecked!=true&&MemoryAllocation.ValidateManual(memory,MemorySnapshot.Read(),detected?.Bits??64) is { } memoryError)throw new InvalidDataException(memoryError);
                     local.Java=new(){Path=path,AutoMemory=Own(_memoryOverride)?_auto.IsChecked==true:defaults.AutoMemory,MemoryMb=memory};
                 }
                 if(Own(_windowOverride)||Own(_sizeOverride))

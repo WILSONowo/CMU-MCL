@@ -111,13 +111,19 @@ public partial class MainWindow
         if(!_windowClosed)RefreshAfterInstanceSettings();
     }
 
-    private void TrackGame(InstanceCardViewModel card, Process process)
+    private readonly HashSet<Process> _stoppedByUser = new();
+    private void TrackGame(InstanceCardViewModel card, Process process, GameProcessDiagnostics? diagnostics = null)
     {
         _gameProcesses[card.InstanceId] = process;
         void Finished()
         {
             if (_gameProcesses.TryGetValue(card.InstanceId,out var current) && ReferenceEquals(current,process))
-            { _gameProcesses.Remove(card.InstanceId);card.GameExited(); }
+            {
+                _gameProcesses.Remove(card.InstanceId);
+                int? code=null;try{code=process.ExitCode;}catch{ }
+                bool stopped=_stoppedByUser.Remove(process);
+                card.GameExited(code,code is null or 0?null:diagnostics?.DescribeHint(),stopped);
+            }
         }
         process.Exited += (_,_) => { if(!Dispatcher.HasShutdownStarted)Dispatcher.BeginInvoke(new Action(Finished)); };
         process.EnableRaisingEvents = true;
@@ -133,8 +139,8 @@ public partial class MainWindow
         if(await ShowInlinePromptAsync("结束游戏","将结束此实例的游戏进程，未保存的游戏进度可能丢失。继续？")!=InlineChoice.Continue)return;
         // The process may exit while the embedded confirmation is open.
         if(!_gameProcesses.TryGetValue(card.InstanceId,out var current) || !ReferenceEquals(process,current))return;
-        try { TerminateTrackedGame(process); }
-        catch { card.LaunchFail("无法结束游戏进程，请检查游戏是否已退出。"); }
+        try { _stoppedByUser.Add(process); TerminateTrackedGame(process); }
+        catch { _stoppedByUser.Remove(process); card.LaunchFail("无法结束游戏进程，请检查游戏是否已退出。"); }
     }
 
     // Operates only on the Process object returned by this launch. Never finds or

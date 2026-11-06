@@ -17,34 +17,6 @@ internal static partial class Program
         var start=DateTime.UtcNow;
         while(!condition()) { if((DateTime.UtcNow-start).TotalMilliseconds>timeout) throw new Exception("Timed out waiting for UI state"); await Task.Delay(50); }
     }
-    private static void JavaSaveDiagnostic(MainWindow window, SettingsStore store, string fixture)
-    {
-        var candidate = JavaLocator.DetectExecutable(fixture);
-        var detected = (JavaInfo?)typeof(MainWindow).GetField("_detectedJava", BindingFlags.Instance|BindingFlags.NonPublic)!.GetValue(window);
-        var state = new {
-            process_64bit = Environment.Is64BitProcess,
-            os_64bit = Environment.Is64BitOperatingSystem,
-            reported_os_architecture = System.Runtime.InteropServices.RuntimeInformation.OSArchitecture.ToString(),
-            candidate_exists = candidate != null,
-            candidate_major = candidate?.Major,
-            candidate_architecture = candidate?.Architecture,
-            candidate_supported = candidate?.IsSupportedArchitecture,
-            manual_checked = Get<RadioButton>(window,"JavaManualRadio").IsChecked,
-            auto_checked = Get<RadioButton>(window,"JavaAutoRadio").IsChecked,
-            selected_candidate = Get<ComboBox>(window,"JavaCandidatesCombo").SelectedItem is JavaInfo,
-            field_matches_fixture = Get<TextBox>(window,"JavaPathTextBox").Text == fixture,
-            saved_matches_fixture = store.Load().JavaPath == fixture,
-            saved_canonical_matches_fixture = string.Equals(Path.GetFullPath(store.Load().JavaPath ?? "."), Path.GetFullPath(fixture), StringComparison.OrdinalIgnoreCase),
-            detected_major = detected?.Major,
-            detected_supported = detected?.IsSupportedArchitecture,
-            probe_generation = typeof(MainWindow).GetField("_javaProbeGeneration", BindingFlags.Instance|BindingFlags.NonPublic)!.GetValue(window),
-            loading_preferences = typeof(MainWindow).GetField("_loadingPreferences", BindingFlags.Instance|BindingFlags.NonPublic)!.GetValue(window),
-            scanning_java = typeof(MainWindow).GetField("_scanningJava", BindingFlags.Instance|BindingFlags.NonPublic)!.GetValue(window),
-            java_error_visible = Get<TextBlock>(window,"JavaErrorText").Visibility == Visibility.Visible,
-            preference_notice_visible = Get<Border>(window,"PreferenceNotice").IsVisible
-        };
-        File.WriteAllText(Path.Combine(_output,"java-save-diagnostic.json"),System.Text.Json.JsonSerializer.Serialize(state,new System.Text.Json.JsonSerializerOptions { WriteIndented=true }));
-    }
     private static Task CallAsync(object target,string method,params object[] args) => (Task)target.GetType().GetMethod(method,BindingFlags.Instance|BindingFlags.NonPublic)!.Invoke(target,args)!;
     private static async Task UiChecks(Application app,MainWindow window,SettingsStore store,InstalledStateStore installed,LaunchService launch,YggdrasilClient auth,AuthStore authStore,bool live)
     {
@@ -54,42 +26,56 @@ internal static partial class Program
         Check(store.Load().Theme==LauncherTheme.Dark,"title-bar theme toggle persists immediately");
         Click(window,"ThemeToggleButton"); Screenshot(window,"home-light.png");
         Click(window,"SettingsNavButton"); await Task.Delay(100);
-        var memory=Get<TextBox>(window,"MemoryTextBox");
-        Get<RadioButton>(window,"MemoryManualRadio").IsChecked=true;
-        Get<Slider>(window,"MemorySlider").Value=3072;
-        Check(memory.Text=="3072" && store.Load().MaxMemoryMb==3072,"memory slider saves immediately");
-        memory.Text="2048";
-        Check(!store.Load().AutoMemory && store.Load().MaxMemoryMb==2048,"typed valid memory persists without save");
+        var editor=(InstanceSettingsView)Get<ContentControl>(window,"GameDefaultsCard").Content;
+        T Field<T>(string name)=>(T)typeof(InstanceSettingsView).GetField(name,BindingFlags.NonPublic|BindingFlags.Instance)!.GetValue(editor)!;
+        void SaveDefaults()=>Descendants(editor).OfType<Button>().Single(x=>Equals(x.Content,"保存")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        var status=Field<TextBlock>("_status");var memory=Field<TextBox>("_memory");var auto=Field<CheckBox>("_auto");
+        Check(editor.IsGlobal && editor.IsVisible && window.FindName("MemoryTextBox")==null && window.FindName("JavaPathTextBox")==null,"game defaults use one inline editor without legacy controls");
+        auto.IsChecked=false;auto.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+        Field<Slider>("_memorySlider").Value=3072;
+        Check(memory.Text=="3072" && memory.IsEnabled,"memory slider fills manual allocation");
+        SaveDefaults();
+        Check(!store.Load().AutoMemory && store.Load().MaxMemoryMb==3072 && !editor.HasUnsavedChanges,"manual memory persists on save");
         window.UpdateLayout(); var caret=memory.GetRectFromCharacterIndex(0);
         Check(caret.X>=1 && caret.X<=14,"textbox leading inset applied once");
-        memory.Text="bad";
-        Check(Get<TextBlock>(window,"MemoryErrorText").Visibility==Visibility.Visible && store.Load().MaxMemoryMb==2048,"invalid memory keeps last valid setting");
+        memory.Text="bad";SaveDefaults();
+        Check(status.Text.Contains("内存") && store.Load().MaxMemoryMb==3072 && editor.HasUnsavedChanges,"invalid memory keeps last valid setting");
+        long physical=MemorySnapshot.Read().TotalMb;
+        if(physical>0)
+        {
+            memory.Text=(physical+1024).ToString();SaveDefaults();
+            Check(status.Text.Contains("物理内存") && store.Load().MaxMemoryMb==3072,"manual memory above physical RAM is rejected on save");
+        }
         memory.Text="2048";
-        Get<RadioButton>(window,"MemoryAutoRadio").IsChecked=true;
-        Check(store.Load().AutoMemory && store.Load().MaxMemoryMb==2048 && !memory.IsEnabled,"auto memory persists and remembers manual allocation");
         Directory.CreateDirectory(LauncherPaths.SettingsPath+".tmp");
-        Get<RadioButton>(window,"MemoryManualRadio").IsChecked=true; memory.Text="3072";
+        SaveDefaults();
+        Check(status.Text.StartsWith("保存失败") && store.Load().MaxMemoryMb==3072 && editor.HasUnsavedChanges,"game defaults save failure keeps edits and previous file");
         Get<ComboBox>(window,"ThemeCombo").SelectedIndex=(int)LauncherTheme.Dark;
-        Check(Get<Border>(window,"PreferenceNotice").IsVisible && store.Load().AutoMemory && !AppearanceManager.IsDark,"save failure preserves committed state and reports retry");
+        Check(Get<Border>(window,"PreferenceNotice").IsVisible && !AppearanceManager.IsDark,"save failure preserves committed state and reports retry");
         Directory.Delete(LauncherPaths.SettingsPath+".tmp");
         Click(window,"RetryPreferenceButton");
-        Check(!store.Load().AutoMemory && store.Load().MaxMemoryMb==3072 && AppearanceManager.IsDark && !Get<Border>(window,"PreferenceNotice").IsVisible,"retry commits all pending valid settings");
+        Check(AppearanceManager.IsDark && !Get<Border>(window,"PreferenceNotice").IsVisible,"retry commits pending launcher preferences");
+        SaveDefaults();
+        Check(store.Load().MaxMemoryMb==2048 && store.Load().Theme==LauncherTheme.Dark,"game defaults save after the directory recovers without reverting theme");
+        auto.IsChecked=true;auto.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));SaveDefaults();
+        Check(store.Load().AutoMemory && store.Load().MaxMemoryMb==2048 && !memory.IsEnabled,"auto memory persists and remembers manual allocation");
         Screenshot(window,"runtime-dark.png");
         Get<ComboBox>(window,"ThemeCombo").SelectedIndex=(int)LauncherTheme.Light;
         Screenshot(window,"runtime-light.png");
         string java=CreateJavaFixture("chosen-java","21.0.5","x64");
-        Get<ComboBox>(window,"JavaCandidatesCombo").ItemsSource=new[]{JavaLocator.DetectExecutable(java)!};
-        Get<ComboBox>(window,"JavaCandidatesCombo").SelectedIndex=0;
-        try { await Until(()=>store.Load().JavaPath==java); }
-        catch { JavaSaveDiagnostic(window, store, java); throw; }
-        Check(Get<RadioButton>(window,"JavaManualRadio").IsChecked==true,"selected Java validates and saves automatically");
-        Check(Descendants(Get<ComboBox>(window,"JavaCandidatesCombo")).OfType<TextBlock>().Any(t=>t.Text.Contains("21.0.5")),"Java selection shows version and architecture");
-        Get<TextBox>(window,"JavaPathTextBox").Text=Path.Combine(_output,"nonexistent.exe");
-        await Until(()=>Get<TextBlock>(window,"JavaErrorText").Visibility==Visibility.Visible);
+        var candidates=Field<ComboBox>("_javaCandidates");
+        candidates.ItemsSource=new[]{JavaLocator.DetectExecutable(java)!};candidates.SelectedIndex=0;
+        Check(Field<TextBox>("_java").Text==java,"selected Java fills the path");
+        SaveDefaults();
+        Check(store.Load().JavaPath==java,"selected Java validates and saves");
+        window.UpdateLayout();
+        Check(Descendants(candidates).OfType<TextBlock>().Any(t=>t.Text.Contains("21.0.5")),"Java selection shows version and architecture");
+        Field<TextBox>("_java").Text=Path.Combine(_output,"nonexistent.exe");SaveDefaults();
+        Check(status.Text.Contains("Java") && store.Load().JavaPath==java,"invalid Java is rejected without overwriting the saved path");
         Click(window,"ThemeToggleButton");
         Check(store.Load().JavaPath==java && store.Load().Theme==LauncherTheme.Dark,"invalid Java does not block independent theme save");
-        Get<RadioButton>(window,"JavaAutoRadio").IsChecked=true;
-        Check(store.Load().JavaPath==null,"automatic Java clears manual override immediately");
+        Descendants(editor).OfType<Button>().Single(x=>Equals(x.Content,"自动选择")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));SaveDefaults();
+        Check(store.Load().JavaPath==null && !editor.HasUnsavedChanges,"automatic Java clears manual override on save");
         Click(window,"AppearanceTab");
         await ProxyUiChecks(window,store);
         Click(window,"AppearanceTab");
@@ -195,6 +181,10 @@ internal static partial class Program
         }
         plainLogin.Close();
         Check(!File.Exists(Path.Combine(LauncherPaths.RootDirectory,"auth.dat")),"fixture never creates real account data");
+        var exited=new InstanceCardViewModel("local:exit-fixture","退出示例","本地实例",new InstanceMetadata{Id="local:exit-fixture",Game="1.21.1"},Path.Combine(_output,"exit-fixture"));
+        exited.GameExited(0);Check(exited.StatusText=="游戏已退出","normal game exit is not reported as a crash");
+        exited.GameExited(1,"内存不足，请提高内存分配或关闭其他程序。");Check(exited.StatusText.Contains("异常退出（代码 1）") && exited.StatusText.Contains("内存不足"),"abnormal game exit shows code and diagnostic hint");
+        exited.GameExited(1,null,stoppedByUser:true);Check(exited.StatusText=="游戏已结束","user-terminated game is not reported as a crash");
     }
 
     internal static void CommunityUiChecks(Window window)

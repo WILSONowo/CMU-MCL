@@ -210,7 +210,7 @@ namespace CMUmcl.Launch
                     MaximumRamMb = MemoryAllocation.Resolve(prepared.Settings, prepared.Java, MemorySnapshot.Read()),
                     MinimumRamMb = 512,
                     GameLauncherName = "CMUmcl",
-                    GameLauncherVersion = "0.1.0",
+                    GameLauncherVersion = CMUmcl.Update.LauncherUpdateClient.CurrentVersion.ToString(3),
                     ArgumentDictionary = new Dictionary<string, string>
                     {
                         ["game_directory"] = gameDir,
@@ -279,6 +279,7 @@ namespace CMUmcl.Launch
                 Session = session,
                 VersionName = prepared.VersionName,
                 WindowDetected = windowDetected,
+                Diagnostics = gameDiagnostics,
             };
         }
 
@@ -516,11 +517,27 @@ namespace CMUmcl.Launch
                 case "quilt":
                 {
                     progress?.Report(new LaunchProgress { Stage = "安装 Quilt", Message = "正在安装 Quilt…" });
-                    var quilt = new QuiltInstaller(_http);
-                    if (string.IsNullOrWhiteSpace(loaderVersion))
-                        versionName = await quilt.Install(gameVersion, launcher.MinecraftPath).ConfigureAwait(false);
-                    else
-                        versionName = await quilt.Install(gameVersion, loaderVersion, launcher.MinecraftPath).ConfigureAwait(false);
+                    // Same bounded wait and error mapping as Fabric (the shared client keeps the 100 s default).
+                    using var quiltHttp = new HttpClient(CMUmcl.Network.LauncherProxy.CreateHandler())
+                    {
+                        Timeout = TimeSpan.FromSeconds(45)
+                    };
+                    var quilt = new QuiltInstaller(quiltHttp);
+                    try
+                    {
+                        if (string.IsNullOrWhiteSpace(loaderVersion))
+                            versionName = await quilt.Install(gameVersion, launcher.MinecraftPath).ConfigureAwait(false);
+                        else
+                            versionName = await quilt.Install(gameVersion, loaderVersion, launcher.MinecraftPath).ConfigureAwait(false);
+                    }
+                    catch (TaskCanceledException) when (!ct.IsCancellationRequested)
+                    {
+                        throw new LaunchException("Quilt 版本服务器响应超时，请检查网络后重试。");
+                    }
+                    catch (HttpRequestException)
+                    {
+                        throw new LaunchException("Quilt 版本服务器网络错误，请检查网络后重试。");
+                    }
 
                     progress?.Report(new LaunchProgress { Stage = "安装 Quilt", Message = $"正在下载 Quilt 依赖（{versionName}）…" });
                     await launcher.InstallAsync(

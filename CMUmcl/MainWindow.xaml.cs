@@ -2,7 +2,6 @@ using System;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
-using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
@@ -438,8 +437,6 @@ namespace CMUmcl
 
             HeaderTitleText.Text = "设置";
             HeaderStatusText.Text = "启动器设置";
-            // The shared game settings editor scans Java on request.
-            UpdateMemoryPreview();
             RefreshButton.Visibility = Visibility.Collapsed;
             NewInstanceButton.Visibility = Visibility.Collapsed;
 
@@ -461,7 +458,7 @@ namespace CMUmcl
             UpdateNavStyles();
 
             HeaderTitleText.Text = "社区资源";
-            HeaderStatusText.Text = "";
+            HeaderStatusText.Text = "搜索并安装模组、整合包、资源包和光影";
             NewInstanceButton.Visibility = Visibility.Collapsed;
             RefreshButton.Visibility = Visibility.Visible;
 
@@ -707,7 +704,7 @@ namespace CMUmcl
                 if (!await TryAutoUpdateBeforeLaunchAsync(vm,cancellation.Token)) return;
                 cancellation.Token.ThrowIfCancellationRequested();
                 LaunchResult result = await LaunchWithLoginRecoveryAsync(vm, progress, cancellation.Token);
-                TrackGame(vm,result.Process);
+                TrackGame(vm,result.Process,result.Diagnostics);
 
                 if (result.WindowDetected)
                 {
@@ -828,33 +825,25 @@ namespace CMUmcl
         }
 
         /// <summary>
-        /// Resolves a manifest entry by id, preferring the already-loaded pack cards and falling
-        /// back to a fresh manifest fetch. Returns null on not-found/fetch failure (caller errors).
+        /// Resolves a manifest entry by id from a fresh signed manifest, so a revision published
+        /// while the launcher stays open is still applied before launch. Falls back to the entry
+        /// verified when the pack list was loaded; returns null when neither is available.
         /// </summary>
         private async Task<ManifestInstance?> TryGetManifestInstanceAsync(string id, CancellationToken ct = default)
         {
-            foreach (PackCardViewModel card in _cards)
-            {
-                if (string.Equals(card.InstanceId, id, StringComparison.Ordinal))
-                    return card.Instance;
-            }
-
             try
             {
                 ResourceManifest manifest = await _manifestClient.GetManifestAsync(ct);
-                foreach (ManifestInstance instance in manifest.Instances)
-                {
-                    if (string.Equals(instance.Id, id, StringComparison.Ordinal))
-                        return instance;
-                }
+                ManifestInstance? fresh = manifest.Instances?.FirstOrDefault(instance => string.Equals(instance.Id, id, StringComparison.Ordinal));
+                if (fresh != null) return fresh;
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
             catch
             {
-                // Fetch failure (network/signature/allowlist) — the caller fails closed.
+                // Fetch failure (network/signature/allowlist): use the list loaded earlier, if any.
             }
 
-            return null;
+            return _cards.FirstOrDefault(card => string.Equals(card.InstanceId, id, StringComparison.Ordinal))?.Instance;
         }
 
         private void InstanceSettings_Click(object sender, RoutedEventArgs e)
@@ -867,7 +856,7 @@ namespace CMUmcl
         {
             _settings=_settingsStore.Load();
             _community.RefreshTargets();
-            _loadingPreferences=true;try{LoadPreferenceControls();JavaPathTextBox.Text=_settings.JavaPath??"";}finally{_loadingPreferences=false;}
+            _loadingPreferences=true;try{LoadPreferenceControls();}finally{_loadingPreferences=false;}
             RefreshInstances();
         }
 
@@ -886,11 +875,14 @@ namespace CMUmcl
             }
         }
 
-        private void LogoutButton_Click(object sender, RoutedEventArgs e)
+        private async void LogoutButton_Click(object sender, RoutedEventArgs e)
         {
             if (_updatingLauncher) return;
+            // Resolve pending game defaults first so a cancelled prompt leaves the session intact.
+            if (!await ResolveUnsavedGameDefaultsAsync("退出登录") || _windowClosed) return;
             _store.ClearSession();
             LogoutRequested?.Invoke();
+            _closingAfterFlush = true;
             Close();
         }
 
@@ -900,11 +892,6 @@ namespace CMUmcl
 
         private void InitializeSettingsPage()
         {
-            long totalMb = GetSystemTotalMemoryMb();
-            SystemMemoryText.Text = totalMb > 0
-                ? $"系统总内存：{FormatUtils.FormatBytes(totalMb * 1024L * 1024L)}"
-                : "系统总内存：未知";
-
             IsolationComboBox.Items.Add(new ComboBoxItem { Content = "关闭" });
             IsolationComboBox.Items.Add(new ComboBoxItem { Content = "仅模组实例" });
             IsolationComboBox.Items.Add(new ComboBoxItem { Content = "全部实例" });
@@ -919,17 +906,6 @@ namespace CMUmcl
             _loadingPreferences = true;
             try
             {
-                bool manual = !string.IsNullOrWhiteSpace(_settings.JavaPath);
-                JavaAutoRadio.IsChecked = !manual;
-                JavaManualRadio.IsChecked = manual;
-
-                JavaPathTextBox.Text = _settings.JavaPath ?? string.Empty;
-                JavaPathTextBox.IsEnabled = manual;
-                BrowseJavaButton.IsEnabled = manual;
-                JavaPathRow.Visibility = manual ? Visibility.Visible : Visibility.Collapsed;
-
-                MemoryTextBox.Text = _settings.MaxMemoryMb.ToString();
-
                 int index = (int)_settings.VersionIsolation;
                 IsolationComboBox.SelectedIndex = index >= 0 && index <= 2 ? index : 1;
 
@@ -940,52 +916,11 @@ namespace CMUmcl
                 AutoUpdatePacksCheck.IsChecked = _settings.AutoUpdatePacks;
 
                 LoadPreferenceControls();
-                UpdateJavaDetectedText();
-                ClearErrors();
             }
             finally { _loadingPreferences = false; }
-            UpdateMemoryPreview();
         }
 
-        private void JavaMode_Checked(object sender, RoutedEventArgs e)
-        {
-            if (JavaPathTextBox == null) return;
-
-            bool manual = JavaManualRadio.IsChecked == true;
-            if (!manual) JavaCandidatesCombo.SelectedIndex = -1;
-            JavaPathTextBox.IsEnabled = manual;
-            BrowseJavaButton.IsEnabled = manual;
-            JavaPathRow.Visibility = manual ? Visibility.Visible : Visibility.Collapsed;
-            ShowJavaError(null);
-            if (!manual) SavePreference(s => s.JavaPath = null);
-            UpdateJavaDetectedText();
-        }
-
-        private void JavaPathTextBox_TextChanged(object sender, TextChangedEventArgs e)
-        {
-            if (JavaDetectedText == null) return;
-            ShowJavaError(null);
-            UpdateJavaDetectedText();
-        }
-
-        private void BrowseJavaButton_Click(object sender, RoutedEventArgs e)
-        {
-            var dlg = new Microsoft.Win32.OpenFileDialog
-            {
-                Title = "选择 Java 运行环境",
-                Filter = "javaw.exe|javaw.exe|java.exe|java.exe|所有文件|*.*",
-                CheckFileExists = true,
-            };
-
-            if (dlg.ShowDialog(this) == true)
-            {
-                JavaManualRadio.IsChecked = true;
-                JavaPathTextBox.Text = dlg.FileName;
-                UpdateJavaDetectedText();
-            }
-        }
-
-        private void MemoryTextBox_PreviewTextInput(object sender, System.Windows.Input.TextCompositionEventArgs e)
+        private void DigitsOnly_PreviewTextInput(object sender, System.Windows.Input.TextCompositionEventArgs e)
         {
             foreach (char c in e.Text)
             {
@@ -1121,24 +1056,6 @@ namespace CMUmcl
             }
         }
 
-        private void ClearErrors()
-        {
-            ShowJavaError(null);
-            ShowMemoryError(null);
-        }
-
-        private void ShowJavaError(string? message)
-        {
-            JavaErrorText.Text = message ?? string.Empty;
-            JavaErrorText.Visibility = string.IsNullOrEmpty(message) ? Visibility.Collapsed : Visibility.Visible;
-        }
-
-        private void ShowMemoryError(string? message)
-        {
-            MemoryErrorText.Text = message ?? string.Empty;
-            MemoryErrorText.Visibility = string.IsNullOrEmpty(message) ? Visibility.Collapsed : Visibility.Visible;
-        }
-
         // ------------------------------------------------------------------
         // Packs view visibility
         // ------------------------------------------------------------------
@@ -1172,44 +1089,6 @@ namespace CMUmcl
             EmptyStateText.Visibility = _packsState == PacksContentState.Empty ? Visibility.Visible : Visibility.Collapsed;
             LoadingState.Visibility = _packsState == PacksContentState.Loading ? Visibility.Visible : Visibility.Collapsed;
             ErrorState.Visibility = _packsState == PacksContentState.Error ? Visibility.Visible : Visibility.Collapsed;
-        }
-
-        // ------------------------------------------------------------------
-        // System memory (best effort)
-        // ------------------------------------------------------------------
-
-        [StructLayout(LayoutKind.Sequential)]
-        private struct MemoryStatusEx
-        {
-            public uint dwLength;
-            public uint dwMemoryLoad;
-            public ulong ullTotalPhys;
-            public ulong ullAvailPhys;
-            public ulong ullTotalPageFile;
-            public ulong ullAvailPageFile;
-            public ulong ullTotalVirtual;
-            public ulong ullAvailVirtual;
-            public ulong ullAvailExtendedVirtual;
-        }
-
-        [DllImport("kernel32.dll", SetLastError = true)]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        private static extern bool GlobalMemoryStatusEx(ref MemoryStatusEx lpBuffer);
-
-        private static long GetSystemTotalMemoryMb()
-        {
-            try
-            {
-                var status = new MemoryStatusEx { dwLength = (uint)Marshal.SizeOf<MemoryStatusEx>() };
-                if (GlobalMemoryStatusEx(ref status))
-                    return (long)(status.ullTotalPhys / (1024L * 1024L));
-            }
-            catch
-            {
-                // Fall through to "unknown".
-            }
-
-            return 0;
         }
     }
 }
