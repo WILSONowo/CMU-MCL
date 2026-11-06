@@ -58,6 +58,24 @@ internal static partial class Program
         Check(Field<TextBox>("_width").Text=="1366" && view.HasUnsavedChanges,"unified: returning from directory page preserves settings edits");
         view.SaveAndClose();var saved=InstanceOptionsStore.Load(directory);
         Check(view.Saved && saved.OverrideProperties!.SequenceEqual(new[]{"windowSize"}),"granular: UI saves only chosen override keys");
+        // Version pickers load their own lists; vanilla has no loader build.
+        VersionChoices.Override=(loader,game)=>Task.FromResult(loader==null?new[]{"1.21.1","1.20.4"}:game=="1.21.1"?new[]{"0.16.10","0.16.9"}:new[]{"0.15.0"});
+        try
+        {
+            var picker=new InstanceSettingsView(directory,"Version fixture",store){Width=850,Height=650};picker.Show();await Task.Delay(30);
+            Descendants(picker).OfType<ListBox>().First().SelectedIndex=1;await Task.Delay(80);picker.UpdateLayout();
+            T PickerField<T>(string name)=>(T)picker.GetType().GetField(name,BindingFlags.NonPublic|BindingFlags.Instance)!.GetValue(picker)!;
+            var game=PickerField<ComboBox>("_gameVersion");var kind=PickerField<ComboBox>("_loaderKind");var loaderVersion=PickerField<ComboBox>("_loaderVersion");
+            Check(game.Items.Count==2 && !Descendants(picker).OfType<Button>().Any(x=>x.Content is string s&&s.StartsWith("获取")),"versions: list loads with the tab, no fetch buttons");
+            kind.SelectedItem="vanilla";await Task.Delay(20);
+            Check(!loaderVersion.IsEnabled && loaderVersion.Text=="","versions: vanilla clears and disables loader version");
+            kind.SelectedItem="fabric";await Until(()=>loaderVersion.Text=="0.16.10");
+            Check(loaderVersion.IsEnabled && loaderVersion.Items.Count==2,"versions: choosing a loader selects its newest compatible build");
+            game.SelectedItem="1.20.4";await Until(()=>loaderVersion.Text=="0.15.0");
+            Check(true,"versions: changing game version re-picks a compatible loader build");
+            picker.Close();
+        }
+        finally { VersionChoices.Override=null; }
         Click(owner,"SettingsNavButton");Click(owner,"RuntimeTab");owner.UpdateLayout();
         var editor=(InstanceSettingsView)Get<ContentControl>(owner,"GameDefaultsCard").Content;
         Check(editor.IsGlobal && editor.IsVisible && !Get<ContentControl>(owner,"InstanceSettingsHost").IsVisible,"global: settings render inline without changing page");

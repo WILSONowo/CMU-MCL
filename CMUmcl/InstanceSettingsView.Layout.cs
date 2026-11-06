@@ -22,11 +22,13 @@ internal sealed partial class InstanceSettingsView
         {
             InstancePageUi.Initialize(this);scroll.Content=null;
             var inline=new StackPanel();inline.Children.Add(_content);
-            _status.Margin=new Thickness(0,0,10,0);_status.FontSize=12;_status.SetResourceReference(TextBlock.ForegroundProperty,"MutedTextBrush");
+            _status.Margin=new Thickness(0);_status.FontSize=12;_status.SetResourceReference(TextBlock.ForegroundProperty,"MutedTextBrush");
             inline.Children.Add(_status);Content=inline;
         }
         else InstancePageUi.Shell(this, Title, () => BackRequested?.Invoke(), nav, host, _status);
-        var game = new StackPanel { Margin = new Thickness(0, 0, 10, 0) };
+        // Embedded pages leave room for their own scrollbar; the inline settings tab scrolls with the page.
+        var pageMargin = new Thickness(0, 0, _inlineGlobal ? 0 : 10, 0);
+        var game = new StackPanel { Margin = pageMargin };
         var context = new DockPanel { Margin = new Thickness(0, 0, 0, 14), LastChildFill=false, HorizontalAlignment=HorizontalAlignment.Right };
         if (!_global)
         {
@@ -38,10 +40,11 @@ internal sealed partial class InstanceSettingsView
         if(!_global)game.Children.Add(context);
         foreach (int i in new[] { 1, 2, 3 }) game.Children.Add(_pages[i]);
         _content.Children.Add(game);
-        foreach (int i in new[] { 0, 4, 5 }) { _pages[i].Margin = new Thickness(0, 0, 10, 0); _pages[i].Visibility = Visibility.Collapsed; _content.Children.Add(_pages[i]); }
+        foreach (int i in new[] { 0, 4, 5 }) { _pages[i].Margin = pageMargin; _pages[i].Visibility = Visibility.Collapsed; _content.Children.Add(_pages[i]); }
         nav.SelectionChanged += (_, _) =>
         {
             int tab = nav.SelectedIndex;
+            if (!_global && tab == 1) PrefetchVersionLists();
             _embeddedContent?.Close(); if (_embeddedContent != null) host.Children.Remove(_embeddedContent); _embeddedContent = null;
             bool contentTab = !_global && tab >= 2 && tab <= 4;
             scroll.Visibility = contentTab ? Visibility.Collapsed : Visibility.Visible;

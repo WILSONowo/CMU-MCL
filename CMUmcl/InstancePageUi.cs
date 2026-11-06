@@ -38,10 +38,8 @@ internal static class InstancePageUi
         backButton.Margin = new Thickness(0, 0, 14, 0);
         DockPanel.SetDock(backButton, Dock.Left);
         heading.Children.Add(backButton);
-        var label = Text(title, 18);
-        label.FontWeight = FontWeights.SemiBold;
-        label.VerticalAlignment = VerticalAlignment.Center;
-        heading.Children.Add(label);
+        // The main window header already shows the page and instance name; only navigation goes here.
+        heading.LastChildFill = false;
         root.Children.Add(heading);
 
         var body = new Grid();

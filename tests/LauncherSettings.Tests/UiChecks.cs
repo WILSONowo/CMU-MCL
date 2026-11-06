@@ -281,6 +281,8 @@ internal static partial class Program
         var sort = Descendants(Get<Border>(view, "SearchFilters")).OfType<ComboBox>().Last(); System.Windows.Input.Keyboard.Focus(sort); window.UpdateLayout();
         Check(sort.FocusVisualStyle == null && results.ItemContainerStyle.Setters.OfType<Setter>().Any(x => x.Property == Control.TemplateProperty), "community: dropdown focus and selected result use launcher styling");
         Screenshot(window, "community-focus.png");
+        var searchBox = Get<TextBox>(view, "ResourceSearchText"); var caretX = searchBox.GetRectFromCharacterIndex(0).X;
+        Check(caretX >= 1 && caretX <= 14, "community: search box caret starts at the normal inset (" + caretX.ToString("0") + ")");
 
         // Option value sanity.
         Check(new[]{"fabric","forge","neoforge","quilt"}.All(l => vm.LoaderOptions.Any(o => o.Value == l)), "community: loader options include fabric/forge/neoforge/quilt");

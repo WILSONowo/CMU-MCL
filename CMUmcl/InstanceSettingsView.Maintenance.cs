@@ -28,11 +28,10 @@ namespace CMUmcl
             InstanceMetadata? metadata=null;try{metadata=InstanceMaintenance.Read(_directory);}catch{ }
             var versions=InstancePageUi.Section(_pages[4],"版本与加载器");
             AddText(versions,"修改版本前请备份存档，并检查模组兼容性。社区整合包仅支持修复。");
-            AddField(versions,"Minecraft 版本",_gameVersion);_gameVersion.Text=metadata?.Game??"";
-            versions.Children.Add(Button("获取 Minecraft 版本列表",()=>_=RunMaintenance(async ct=>{using var catalog=new VersionCatalogService();var values=await catalog.GetMinecraftVersionsAsync(ct);if(values.Count==0)throw new IOException();var selected=_gameVersion.Text;_gameVersion.ItemsSource=values.Select(x=>x.Name).ToArray();_gameVersion.Text=selected;},"版本列表已更新")));
-            AddField(versions,"平台",_loaderKind);_loaderKind.SelectedItem=string.IsNullOrEmpty(metadata?.Loader)?"vanilla":metadata!.Loader;
-            AddField(versions,"加载器版本（原版留空）",_loaderVersion);_loaderVersion.Text=metadata?.LoaderVersion??"";
-            versions.Children.Add(Button("获取兼容加载器版本",()=>_=RunMaintenance(async ct=>{using var catalog=new VersionCatalogService();var values=await catalog.GetLoaderVersionsAsync(_loaderKind.SelectedItem as string??"vanilla",_gameVersion.Text.Trim(),ct);_loaderVersion.ItemsSource=values.Select(x=>x.Version).ToArray();_loaderVersion.Text=values.FirstOrDefault()?.Version??"";},"加载器版本列表已更新")));
+            AddField(versions,"Minecraft 版本",_gameVersion);
+            AddField(versions,"平台",_loaderKind);
+            AddField(versions,"加载器版本",_loaderVersion);
+            SetUpVersionPickers(metadata);
             versions.Children.Add(Button("准备并应用版本修改",()=>StartInstallation(false)));
             var repair=InstancePageUi.Section(_pages[4],"依赖修复");
             var repairActions=new WrapPanel();repair.Children.Add(repairActions);

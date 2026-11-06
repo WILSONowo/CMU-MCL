@@ -15,7 +15,8 @@ public partial class MainWindow
         if(_globalSettingsInline==null)
         {
             _globalSettingsInline=new InstanceSettingsView(LauncherPaths.InstancesDirectory,"全局游戏设置",_settingsStore,true,inlineGlobal:true);
-            _globalSettingsInline.SettingsApplied+=RefreshAfterInstanceSettings;
+            // Autosave fires often; game defaults only change the settings copy, not instances or community targets.
+            _globalSettingsInline.SettingsApplied+=()=>{if(!_windowClosed)_settings=_settingsStore.Load();};
             GameDefaultsCard.Content=_globalSettingsInline;
         }
         else _globalSettingsInline.RefreshGlobalIfUnchanged();

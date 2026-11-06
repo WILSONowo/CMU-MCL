@@ -763,7 +763,6 @@
                         <Border x:Name="IsolationCard" Style="{StaticResource SettingsCard}" Visibility="Collapsed">
                             <StackPanel>
                                 <StackPanel Orientation="Horizontal" Margin="0,0,0,14">
-                                    <TextBlock Text="&#xE8F1;" Style="{StaticResource SectionIcon}" />
                                     <StackPanel>
                                         <TextBlock Text="版本隔离" Style="{StaticResource SectionHeader}" />
                                         <TextBlock Text="选择实例是否共用游戏目录。" Style="{StaticResource Caption}"
@@ -784,7 +783,6 @@
                         <Border x:Name="DirectoryCard" Style="{StaticResource SettingsCard}" Visibility="Collapsed">
                             <StackPanel>
                                 <StackPanel Orientation="Horizontal" Margin="0,0,0,14">
-                                    <TextBlock Text="&#xE80F;" Style="{StaticResource SectionIcon}" />
                                     <StackPanel>
                                         <TextBlock Text="启动器目录" Style="{StaticResource SectionHeader}" />
                                     </StackPanel>
@@ -804,7 +802,6 @@
                         <Border x:Name="InstanceDirectoryCard" Style="{StaticResource SettingsCard}" Visibility="Collapsed">
                             <StackPanel>
                                 <StackPanel Orientation="Horizontal" Margin="0,0,0,14">
-                                    <TextBlock Text="&#xE8B7;" Style="{StaticResource SectionIcon}" />
                                     <StackPanel>
                                         <TextBlock Text="游戏目录" Style="{StaticResource SectionHeader}" />
                                         <TextBlock Text="更改位置将迁移已有实例。" Style="{StaticResource Caption}"
@@ -839,7 +836,6 @@
                         <Border x:Name="PackUpdateCard" Style="{StaticResource SettingsCard}" Visibility="Collapsed">
                             <StackPanel>
                                 <StackPanel Orientation="Horizontal" Margin="0,0,0,14">
-                                    <TextBlock Text="&#xE896;" Style="{StaticResource SectionIcon}" />
                                     <StackPanel>
                                         <TextBlock Text="启动前自动更新整合包" Style="{StaticResource SectionHeader}" />
                                         <TextBlock Text="关闭后直接启动已安装版本。" Style="{StaticResource Caption}"
