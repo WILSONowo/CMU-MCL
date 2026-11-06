@@ -551,7 +551,7 @@ namespace CMUmcl.Launch
         private async Task<T> RunAuthenticatedLaunchAsync<T>(AuthSession session, Func<AuthSession, Task<T>> start, CancellationToken ct)
         {
             try { return await _sessions.RunAsync(session, start, ct).ConfigureAwait(false); }
-            catch (YggdrasilException ex) { throw new LaunchException("无法确认登录状态：" + ex.Message); }
+            catch (YggdrasilException ex) { throw new LaunchException("无法确认登录状态：" + ex.Message, ex); }
         }
 
         internal Task<AuthSession> EnsureValidSessionAsync(AuthSession session, CancellationToken ct = default)

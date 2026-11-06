@@ -109,9 +109,10 @@ namespace CMUmcl
         }
 
         /// <summary>Shows the login window and returns the resulting session, or null if cancelled.</summary>
-        private AuthSession? ShowLogin()
+        private AuthSession? ShowLogin(Window? owner = null)
         {
             var login = new LoginWindow(_client!, _store!) { Title = "CMUmcl \u2014 NET48 " + CMUmcl.Update.LauncherUpdateClient.CurrentVersion.ToString() + " \u767B\u5F55" };
+            if (owner != null) login.Owner = owner;
             bool? ok = login.ShowDialog();
             if (ok == true && login.ResultSession != null)
             {
@@ -124,6 +125,7 @@ namespace CMUmcl
         private void ShowMainWindow(AuthSession session)
         {
             var main = new MainWindow(session, _store!, _manifestClient!, _installer!, _installedState!, _launchService!, _settingsStore!, _localInstanceService!);
+            main.ReauthenticateForLaunch = () => System.Threading.Tasks.Task.FromResult(ShowLogin(main));
             bool loggingOut = false;
 
             main.Title = "CMUmcl \u2014 NET48 " + CMUmcl.Update.LauncherUpdateClient.CurrentVersion.ToString();

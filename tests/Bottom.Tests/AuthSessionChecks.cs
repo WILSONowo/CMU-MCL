@@ -190,5 +190,18 @@ internal static partial class Program
             await AuthRejects(() => AuthSessionGate.CompleteLoginAsync(client,
                 new AuthenticateResult { AccessToken = "invalid", ClientToken = "client", SelectedProfile = selected }, selected, "client", "fixture"),
                 "invalid authenticated token cannot complete login");
+
+        foreach (var status in new[] { HttpStatusCode.Forbidden, HttpStatusCode.ServiceUnavailable })
+        {
+            using var client = new YggdrasilClient(new AuthHandler((path, body, ct) => Task.FromResult(AuthResponse(status))));
+            using var service = new CMUmcl.Launch.LaunchService(client, authStore, new InstalledStateStore(), new SettingsStore());
+            var method = typeof(CMUmcl.Launch.LaunchService).GetMethod("RunAuthenticatedLaunchAsync", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.MakeGenericMethod(typeof(bool));
+            var pending = (Task<bool>)method.Invoke(service, new object[] { session, (Func<AuthSession, Task<bool>>)(_ => Task.FromResult(true)), CancellationToken.None })!;
+            try { await pending; throw new Exception("auth failure was ignored"); }
+            catch (CMUmcl.Launch.LaunchException ex)
+            {
+                Check(ex.RequiresLogin == (status == HttpStatusCode.Forbidden), "launch preserves credential rejection while keeping server/network failures out of login recovery");
+            }
+        }
     }
 }

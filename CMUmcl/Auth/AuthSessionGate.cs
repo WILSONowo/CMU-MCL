@@ -40,14 +40,14 @@ namespace CMUmcl.Auth
                     };
                     RequireComplete(updated);
                     if (!string.Equals(updated.SelectedProfileId, session.SelectedProfileId, StringComparison.OrdinalIgnoreCase))
-                        throw new YggdrasilException("刷新后的角色与当前角色不一致，请重新登录。");
+                        throw new YggdrasilException("刷新后的角色与当前角色不一致，请重新登录。", requiresLogin: true);
                     // Retain the response in memory if verification is cancelled or times
                     // out. Every later use still validates it before persistence/handoff.
                     if (!string.Equals(session.AccessToken, updated.AccessToken, StringComparison.Ordinal))
                         _replacements[session.AccessToken] = updated;
                     // HTTP 200 from refresh is not proof that the replacement is usable.
                     if (!await _client.ValidateAsync(updated.AccessToken, updated.ClientToken, ct).ConfigureAwait(false))
-                        throw new YggdrasilException("刷新后的登录状态仍然无效，请重新登录。");
+                        throw new YggdrasilException("刷新后的登录状态仍然无效，请重新登录。", requiresLogin: true);
                     _store.TryReplaceSession(session, updated);
                     session = updated;
                 }
@@ -95,13 +95,13 @@ namespace CMUmcl.Auth
         {
             if (string.IsNullOrWhiteSpace(session.AccessToken) || string.IsNullOrWhiteSpace(session.ClientToken)
                 || string.IsNullOrWhiteSpace(session.SelectedProfileId) || string.IsNullOrWhiteSpace(session.SelectedProfileName))
-                throw new YggdrasilException("登录信息或角色信息不完整，请重新登录。");
+                throw new YggdrasilException("登录信息或角色信息不完整，请重新登录。", requiresLogin: true);
         }
 
         internal async Task<T> StartAsync<T>(AuthSession session, Func<T> start, CancellationToken ct)
         {
             if (!await _client.ValidateAsync(session.AccessToken, session.ClientToken, ct).ConfigureAwait(false))
-                throw new YggdrasilException("启动前登录状态已失效，请重试；若仍失败，请重新登录。");
+                throw new YggdrasilException("启动前登录状态已失效，请重试；若仍失败，请重新登录。", requiresLogin: true);
             ct.ThrowIfCancellationRequested();
             return start();
         }

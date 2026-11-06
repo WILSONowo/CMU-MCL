@@ -704,11 +704,8 @@ namespace CMUmcl
             {
                 if (!await TryAutoUpdateBeforeLaunchAsync(vm,cancellation.Token)) return;
                 cancellation.Token.ThrowIfCancellationRequested();
-                LaunchResult result = await (_launchOverride != null ? _launchOverride(vm,cancellation.Token) : _launchService.LaunchLocalAsync(vm.InstanceId, _session, progress,cancellation.Token));
+                LaunchResult result = await LaunchWithLoginRecoveryAsync(vm, progress, cancellation.Token);
                 TrackGame(vm,result.Process);
-
-                // The session may have been refreshed during launch.
-                _session = result.Session;
 
                 if (result.WindowDetected)
                 {

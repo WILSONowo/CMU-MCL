@@ -54,7 +54,9 @@ namespace CMUmcl.Auth
     /// <summary>Raised when the Yggdrasil server returns an error or an unexpected status.</summary>
     public sealed class YggdrasilException : Exception
     {
+        public bool RequiresLogin { get; }
         public YggdrasilException(string message) : base(message) { }
+        public YggdrasilException(string message, bool requiresLogin) : base(message) { RequiresLogin = requiresLogin; }
         public YggdrasilException(string message, Exception inner) : base(message, inner) { }
     }
 
@@ -277,10 +279,11 @@ namespace CMUmcl.Auth
                 try
                 {
                     using var doc = JsonDocument.Parse(body);
-                    if (doc.RootElement.TryGetProperty("error", out var e))
-                        error = e.GetString();
-                    if (doc.RootElement.TryGetProperty("errorMessage", out var m))
-                        errorMessage = m.GetString();
+                    if (doc.RootElement.ValueKind == JsonValueKind.Object)
+                    {
+                        error = GetString(doc.RootElement, "error");
+                        errorMessage = GetString(doc.RootElement, "errorMessage");
+                    }
                 }
                 catch (JsonException)
                 {
@@ -289,7 +292,7 @@ namespace CMUmcl.Auth
             }
 
             string friendly = MapError(error, errorMessage, status);
-            return new YggdrasilException(friendly);
+            return new YggdrasilException(friendly, status == HttpStatusCode.Forbidden || status == HttpStatusCode.Unauthorized);
         }
 
         private static string MapError(string? error, string? errorMessage, HttpStatusCode status)
