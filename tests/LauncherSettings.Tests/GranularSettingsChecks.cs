@@ -53,7 +53,7 @@ internal static partial class Program
         Field<TextBox>("_width").Text="1366";
         Check(Field<ComboBox>("_resolution").SelectedIndex==0,"granular: manual dimensions clear mismatched preset");
         var folder=Descendants(view).OfType<Button>().Single(x=>Equals(x.Content,"打开目录"));folder.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));view.UpdateLayout();
-        Check(view.Content is InstanceContentView && !Descendants(view).OfType<ListBox>().Any(x=>x.IsVisible) && Descendants(view).OfType<Button>().Count(x=>x.Tag is string)==6,"unified: directory page shows six cards without category sidebar");
+        Check(view.Content is InstanceContentView && !Descendants(view).OfType<ListBox>().Any(x=>x.IsVisible) && Descendants(view).OfType<Button>().Count(x=>x.Tag is string)==8,"unified: directory page shows eight cards without category sidebar");
         Descendants(view).OfType<Button>().Single(x=>Equals(x.Content,"← 返回")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         Check(Field<TextBox>("_width").Text=="1366" && view.HasUnsavedChanges,"unified: returning from directory page preserves settings edits");
         view.SaveAndClose();var saved=InstanceOptionsStore.Load(directory);

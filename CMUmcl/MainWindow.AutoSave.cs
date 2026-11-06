@@ -37,6 +37,10 @@ public partial class MainWindow
         return true;
     }
     private void RetryPreference_Click(object sender, RoutedEventArgs e) => SavePreference(_ => { });
+    private void AfterLaunch_Changed(object sender, SelectionChangedEventArgs e)
+    {
+        if (AfterLaunchCombo.SelectedIndex >= 0) SavePreference(s => s.AfterLaunch = (AfterLaunchAction)AfterLaunchCombo.SelectedIndex);
+    }
     private void AutoUpdatePacks_Changed(object sender, RoutedEventArgs e)
         => SavePreference(s => s.AutoUpdatePacks = AutoUpdatePacksCheck.IsChecked == true);
 

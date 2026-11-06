@@ -112,7 +112,22 @@ public partial class MainWindow
     }
 
     private readonly HashSet<Process> _stoppedByUser = new();
-    private void TrackGame(InstanceCardViewModel card, Process process, GameProcessDiagnostics? diagnostics = null)
+    private readonly Dictionary<string, CrashContext> _crashes = new(StringComparer.Ordinal);
+    private CrashContext? CreateCrashContext(InstanceCardViewModel card, LaunchResult result)
+    {
+        try
+        {
+            var metadata=InstanceMaintenance.Read(card.InstallPath);
+            return new CrashContext
+            {
+                InstanceName=card.DisplayName,GameVersion=metadata.Game,Loader=metadata.Loader,LoaderVersion=metadata.LoaderVersion,
+                GameDirectory=GameDirectoryResolver.ResolveGameDirectory(_settingsStore.Load(),card.InstallPath,metadata.Loader),
+                VersionName=result.VersionName,JavaPath=result.JavaPath,JavaMajor=result.JavaMajor,
+            };
+        }
+        catch { return null; }
+    }
+    private void TrackGame(InstanceCardViewModel card, Process process, GameProcessDiagnostics? diagnostics = null, CrashContext? crash = null)
     {
         _gameProcesses[card.InstanceId] = process;
         void Finished()
@@ -122,7 +137,14 @@ public partial class MainWindow
                 _gameProcesses.Remove(card.InstanceId);
                 int? code=null;try{code=process.ExitCode;}catch{ }
                 bool stopped=_stoppedByUser.Remove(process);
-                card.GameExited(code,code is null or 0?null:diagnostics?.DescribeHint(),stopped);
+                string? hint=code is null or 0?null:diagnostics?.DescribeHint();
+                card.GameExited(code,hint,stopped);
+                if(!stopped && code is not (null or 0) && crash!=null)
+                {
+                    crash.ExitCode=code;crash.Hint=hint;crash.ExitedAt=DateTime.Now;
+                    _crashes[card.InstanceId]=crash;card.OfferCrashReport();
+                }
+                RestoreAfterGames();
             }
         }
         process.Exited += (_,_) => { if(!Dispatcher.HasShutdownStarted)Dispatcher.BeginInvoke(new Action(Finished)); };
@@ -134,13 +156,61 @@ public partial class MainWindow
     {
         if(sender is not Button {DataContext:InstanceCardViewModel card})return;
         if(_launchRequests.TryGetValue(card.InstanceId,out var request)){request.Cancel();return;}
-        if(!_gameProcesses.TryGetValue(card.InstanceId,out var process))return;
+        if(!_gameProcesses.TryGetValue(card.InstanceId,out var process))
+        {
+            if(_crashes.TryGetValue(card.InstanceId,out var crash))await ExportCrashReportAsync(card,crash);
+            return;
+        }
         if(process.HasExited){_gameProcesses.Remove(card.InstanceId);card.GameExited();return;}
         if(await ShowInlinePromptAsync("结束游戏","将结束此实例的游戏进程，未保存的游戏进度可能丢失。继续？")!=InlineChoice.Continue)return;
         // The process may exit while the embedded confirmation is open.
         if(!_gameProcesses.TryGetValue(card.InstanceId,out var current) || !ReferenceEquals(process,current))return;
         try { _stoppedByUser.Add(process); TerminateTrackedGame(process); }
         catch { _stoppedByUser.Remove(process); card.LaunchFail("无法结束游戏进程，请检查游戏是否已退出。"); }
+    }
+
+    private bool _minimizedForGame;
+    private void ApplyAfterLaunch()
+    {
+        var action=_settings.AfterLaunch;
+        if(action==AfterLaunchAction.Keep || _windowClosed)return;
+        // Never close over other work: another launch, a download, maintenance or unsaved edits stay visible.
+        bool busy=_launchRequests.Count>1 || _activeOperations>1 || _migrating || _updatingLauncher
+            || CreateInstanceView.HasActiveOperation || _settingsWindows.Values.Any(x=>x.MaintenanceBusy)
+            || _globalSettingsInline?.HasUnsavedChanges==true || _instanceEditor?.HasUnsavedChanges==true;
+        if(action==AfterLaunchAction.Close && !busy)
+        {
+            // Close after the launch call unwinds; the game keeps running without the launcher.
+            _closingAfterFlush=true;
+            Dispatcher.BeginInvoke(new Action(()=>{if(!_windowClosed)Close();}));
+            return;
+        }
+        if(WindowState!=WindowState.Minimized){WindowState=WindowState.Minimized;_minimizedForGame=true;}
+    }
+    private void RestoreAfterGames()
+    {
+        if(!_minimizedForGame || _gameProcesses.Count!=0 || _windowClosed)return;
+        _minimizedForGame=false;
+        if(WindowState==WindowState.Minimized)WindowState=WindowState.Normal;
+        Activate();
+    }
+
+    private async Task ExportCrashReportAsync(InstanceCardViewModel card, CrashContext crash)
+    {
+        var dialog=new Microsoft.Win32.SaveFileDialog
+        {
+            Title="导出崩溃报告",Filter="ZIP 压缩包 (*.zip)|*.zip",FileName=CrashReportExporter.DefaultFileName(crash),
+            InitialDirectory=Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
+        };
+        if(dialog.ShowDialog(this)!=true)return;
+        string target=dialog.FileName;
+        try
+        {
+            // The access token never belongs in a shared report, even if a mod logged it.
+            await Task.Run(()=>CrashReportExporter.Export(crash,target,new[]{_session.AccessToken,_session.ClientToken}));
+            Process.Start(new ProcessStartInfo("explorer.exe","/select,\""+target+"\""){UseShellExecute=true});
+        }
+        catch(Exception ex){LauncherPrompt.Show(this,"导出失败："+ex.Message,"导出崩溃报告",MessageBoxButton.OK,MessageBoxImage.Warning);}
     }
 
     // Operates only on the Process object returned by this launch. Never finds or

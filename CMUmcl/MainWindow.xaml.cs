@@ -697,6 +697,7 @@ namespace CMUmcl
             if (_launchRequests.ContainsKey(vm.InstanceId)) return;
             using var cancellation = new CancellationTokenSource();
             _launchRequests.Add(vm.InstanceId,cancellation);
+            _crashes.Remove(vm.InstanceId);
             vm.BeginLaunch();
             var progress = new Progress<LaunchProgress>(p=>{if(!cancellation.IsCancellationRequested)vm.ReportLaunchProgress(p);});
             try
@@ -704,11 +705,12 @@ namespace CMUmcl
                 if (!await TryAutoUpdateBeforeLaunchAsync(vm,cancellation.Token)) return;
                 cancellation.Token.ThrowIfCancellationRequested();
                 LaunchResult result = await LaunchWithLoginRecoveryAsync(vm, progress, cancellation.Token);
-                TrackGame(vm,result.Process,result.Diagnostics);
+                TrackGame(vm,result.Process,result.Diagnostics,CreateCrashContext(vm,result));
 
                 if (result.WindowDetected)
                 {
                     vm.LaunchStarted();
+                    ApplyAfterLaunch();
                 }
                 else
                 {

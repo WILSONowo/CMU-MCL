@@ -23,5 +23,9 @@ namespace CMUmcl.Launch
 
         /// <summary>Output classification for the started process, used to explain an abnormal exit.</summary>
         public GameProcessDiagnostics? Diagnostics { get; init; }
+
+        /// <summary>The Java runtime the game was started with.</summary>
+        public string? JavaPath { get; init; }
+        public int? JavaMajor { get; init; }
     }
 }

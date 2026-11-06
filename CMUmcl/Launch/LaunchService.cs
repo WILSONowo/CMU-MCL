@@ -280,6 +280,8 @@ namespace CMUmcl.Launch
                 VersionName = prepared.VersionName,
                 WindowDetected = windowDetected,
                 Diagnostics = gameDiagnostics,
+                JavaPath = prepared.Java.JavaPath,
+                JavaMajor = prepared.Java.Major,
             };
         }
 
@@ -322,12 +324,13 @@ namespace CMUmcl.Launch
 
             // Reuse an existing install only when the marker matches and the version files are present.
             if (!forceRepair && ProvisioningMarker.TryReadReady(
-                    instanceDir, LauncherPaths.MinecraftDirectory, signature, out string readyVersionName))
+                    instanceDir, LauncherPaths.MinecraftDirectory, signature, out string readyVersionName)
+                && await IsInstallIntactAsync(launcher, readyVersionName, progress, ct).ConfigureAwait(false))
             {
                 progress?.Report(new LaunchProgress { Stage = "准备", Message = "游戏文件已就绪，跳过下载。" });
 
                 // Java must still be resolved (and possibly downloaded) on every launch.
-                JavaInfo readyJava = await SelectJavaAsync(gameVersion, settings, progress, ct).ConfigureAwait(false);
+                JavaInfo readyJava = await SelectJavaAsync(gameVersion, loader, settings, progress, ct).ConfigureAwait(false);
 
                 return new PreparedInstall
                 {
@@ -349,7 +352,7 @@ namespace CMUmcl.Launch
 
             // Select a compatible Java runtime before loader resolution so Forge/NeoForge
             // processors can run.
-            JavaInfo java = await SelectJavaAsync(gameVersion, settings, progress, ct).ConfigureAwait(false);
+            JavaInfo java = await SelectJavaAsync(gameVersion, loader, settings, progress, ct).ConfigureAwait(false);
 
             string versionName = await InstallLoaderAsync(gameVersion, loader, loaderVersion, java, launcher, progress, ct).ConfigureAwait(false);
 
@@ -367,11 +370,32 @@ namespace CMUmcl.Launch
         }
 
         /// <summary>
+        /// Checks a provisioned version before reusing it. Broken files send the launch through the
+        /// normal install path, which downloads only what is missing and re-runs loader setup.
+        /// A check that cannot run (for example offline without an asset index) never blocks launch.
+        /// </summary>
+        private async Task<bool> IsInstallIntactAsync(MinecraftLauncher launcher, string versionName, IProgress<LaunchProgress>? progress, CancellationToken ct)
+        {
+            progress?.Report(new LaunchProgress { Stage = "检查文件", Message = "正在检查游戏文件完整性…" });
+            int broken;
+            try
+            {
+                broken = await InstallIntegrity.CountBrokenAsync(launcher, versionName, ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+            catch { return true; }
+            if (broken == 0) return true;
+            progress?.Report(new LaunchProgress { Stage = "修复文件", Message = $"发现 {broken} 个缺失或损坏的游戏文件，正在自动修复…" });
+            return false;
+        }
+
+        /// <summary>
         /// Selects a compatible Java runtime: validates a manually configured path first,
         /// otherwise auto-selects from local JDKs or auto-downloads the Mojang runtime.
         /// </summary>
         private static async Task<JavaInfo> SelectJavaAsync(
             string gameVersion,
+            string loader,
             AppSettings settings,
             IProgress<LaunchProgress>? progress,
             CancellationToken ct)
@@ -392,6 +416,9 @@ namespace CMUmcl.Launch
                         $"手动指定的 Java 版本为 {java.Major}，Minecraft {gameVersion} 至少需要 Java {requirement.Major}。请更换对应版本或使用自动选择。");
                 if (requirement.Major >= 21 && java.Bits == 32)
                     throw new LaunchException("此游戏版本需要 64 位 Java，请更换运行时。");
+                if (JavaVersionResolver.ResolveMaximumMajor(gameVersion, loader) is int maximum && java.Major > maximum)
+                    throw new LaunchException(
+                        $"Forge {gameVersion} 只能使用 Java {maximum}，当前手动指定的是 Java {java.Major}，启动后会崩溃。请改用自动选择或指定 Java {maximum}。");
             }
             else
             {

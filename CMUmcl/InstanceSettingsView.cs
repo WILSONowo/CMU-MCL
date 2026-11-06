@@ -122,6 +122,10 @@ namespace CMUmcl
                         if(detected is not {Major:>0})throw new InvalidDataException("Java 路径无效或无法识别版本。");
                         if(!detected.IsSupportedArchitecture)throw new InvalidDataException("所选 Java 与本机架构不兼容，请更换运行时。");
                         path=detected.JavaPath;
+                        InstanceMetadata? metadata=null;
+                        if(!_global){try{metadata=InstanceMaintenance.Read(_directory);}catch{ }}
+                        if(metadata!=null && JavaVersionResolver.ResolveMaximumMajor(metadata.Game??"",metadata.Loader) is int maximum && detected.Major>maximum)
+                            throw new InvalidDataException($"Forge {metadata.Game} 只能使用 Java {maximum}，所选 Java {detected.Major} 会导致启动崩溃。");
                     }
                     // Match the launch-time check so an impossible heap is rejected here, not when starting the game.
                     if(Own(_memoryOverride)&&_auto.IsChecked!=true&&MemoryAllocation.ValidateManual(memory,MemorySnapshot.Read(),detected?.Bits??64) is { } memoryError)throw new InvalidDataException(memoryError);

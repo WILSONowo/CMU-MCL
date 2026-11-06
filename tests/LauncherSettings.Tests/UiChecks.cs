@@ -76,6 +76,15 @@ internal static partial class Program
         Check(store.Load().JavaPath==java && store.Load().Theme==LauncherTheme.Dark,"invalid Java does not block independent theme save");
         Descendants(editor).OfType<Button>().Single(x=>Equals(x.Content,"自动选择")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));SaveDefaults();
         Check(store.Load().JavaPath==null && !editor.HasUnsavedChanges,"automatic Java clears manual override on save");
+        var afterLaunch=Get<ComboBox>(window,"AfterLaunchCombo");
+        Check(Get<Border>(window,"AfterLaunchCard").IsVisible && afterLaunch.SelectedIndex==0,"after-launch option shown on game settings tab and defaults to keep");
+        afterLaunch.SelectedIndex=(int)AfterLaunchAction.Minimize;
+        Check(store.Load().AfterLaunch==AfterLaunchAction.Minimize,"after-launch option autosaves");
+        Call(window,"ApplyAfterLaunch");
+        Check(window.WindowState==WindowState.Minimized,"minimize option minimizes the launcher after the game window appears");
+        Call(window,"RestoreAfterGames");
+        Check(window.WindowState==WindowState.Normal,"launcher is restored when no game is running");
+        afterLaunch.SelectedIndex=(int)AfterLaunchAction.Keep;
         Click(window,"AppearanceTab");
         await ProxyUiChecks(window,store);
         Click(window,"AppearanceTab");

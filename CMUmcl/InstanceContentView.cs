@@ -46,11 +46,11 @@ internal sealed partial class InstanceContentView : UserControl
     internal void SelectCategory(int index)=>_navigation.SelectedIndex=index;
     private void ShowPage()
     {
-        StopSchematicPreview();_generation++;_selected.Clear();_status.Text="";
+        StopSchematicPreview();_generation++;_selected.Clear();_modUpdates.Clear();_status.Text="";
         if(_navigation.SelectedIndex==0)
         {
             var panel=new FolderCardsPanel();
-            foreach(var link in new[]{("版本文件夹",(string?)null),("存档文件夹","saves"),("Mod 文件夹","mods"),("截图文件夹","screenshots"),("资源包文件夹","resourcepacks"),("原理图文件夹","schematics")})
+            foreach(var link in new[]{("版本文件夹",(string?)null),("存档文件夹","saves"),("Mod 文件夹","mods"),("截图文件夹","screenshots"),("资源包文件夹","resourcepacks"),("原理图文件夹","schematics"),("日志文件夹","logs"),("崩溃报告文件夹","crash-reports")})
             {var item=link;var b=Button(item.Item1,()=>OpenFolder(item.Item2));b.HorizontalAlignment=HorizontalAlignment.Stretch;b.Tag=item.Item2??"instance";b.Margin=new Thickness(0);b.SetResourceReference(StyleProperty,"InstanceFolderButton");panel.Children.Add(b);}
             _body.Content=new ScrollViewer{Content=panel,Focusable=false,FocusVisualStyle=null,BorderThickness=new Thickness(0),VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled};return;
         }
@@ -72,6 +72,7 @@ internal sealed partial class InstanceContentView : UserControl
     private void ShowFiles(bool mods)
     {
         string folder=mods?"mods":"resourcepacks";int pageGeneration=_generation,generation=0;
+        Button? updateAll=null;
         var all=new CheckBox{Content="全选",VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(4,0,12,8)};
         var list=new StackPanel();IReadOnlyList<InstanceContentFile> items=Array.Empty<InstanceContentFile>();
         var grid=new Grid();grid.RowDefinitions.Add(new(){Height=GridLength.Auto});grid.RowDefinitions.Add(new(){Height=GridLength.Auto});grid.RowDefinitions.Add(new(){Height=new GridLength(1,GridUnitType.Star)});_body.Content=grid;
@@ -83,11 +84,18 @@ internal sealed partial class InstanceContentView : UserControl
         toolbar.Children.Add(all);
         toolbar.Children.Add(Button("启用/禁用所选",()=>ChangeSelected(false)));
         toolbar.Children.Add(Button("删除所选",()=>ChangeSelected(true)));
+        if(mods && ModUpdateTarget()!=null)
+        {
+            toolbar.Children.Add(Button("检查更新",async()=>await CheckModUpdatesAsync(items,Render)));
+            updateAll=Button("全部更新",async()=>await ApplyModUpdatesAsync(_modUpdates.Values.ToArray(),notice=>Refresh(notice)));
+            updateAll.Visibility=Visibility.Collapsed;toolbar.Children.Add(updateAll);
+        }
         var scroll=new ScrollViewer{Content=list,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled};Grid.SetRow(scroll,2);grid.Children.Add(scroll);
         void Render()
         {
             list.Children.Clear();string query=search.Text.Trim();var visible=items.Where(i=>(i.Name+" "+i.Description+" "+Path.GetFileName(i.Path)).IndexOf(query,StringComparison.OrdinalIgnoreCase)>=0).ToArray();
             list.Children.Add(Label($"全部 {items.Count} · 当前 {visible.Length}",13));
+            if(updateAll!=null){updateAll.Visibility=_modUpdates.Count>0?Visibility.Visible:Visibility.Collapsed;updateAll.Content=$"全部更新（{_modUpdates.Count}）";}
             foreach(var item in visible)
             {
                 var row=new Grid{Margin=new Thickness(12,6,12,6),MinHeight=76};row.ColumnDefinitions.Add(new(){Width=GridLength.Auto});row.ColumnDefinitions.Add(new(){Width=new GridLength(56)});row.ColumnDefinitions.Add(new(){Width=new GridLength(1,GridUnitType.Star)});row.ColumnDefinitions.Add(new(){Width=GridLength.Auto});
@@ -100,6 +108,11 @@ internal sealed partial class InstanceContentView : UserControl
                 var text=new StackPanel{Margin=new Thickness(0,8,12,8),VerticalAlignment=VerticalAlignment.Center};Grid.SetColumn(text,2);row.Children.Add(text);
                 var title=RowText(item.Name+(item.Disabled?" · 已禁用":""),14,false);title.FontWeight=FontWeights.SemiBold;text.Children.Add(title);text.Children.Add(RowText(Path.GetFileName(item.Path),12,true));if(item.Description.Length>0)text.Children.Add(RowText(item.Description,12,true));
                 var actions=new WrapPanel{MaxWidth=148,VerticalAlignment=VerticalAlignment.Center};Grid.SetColumn(actions,3);row.Children.Add(actions);
+                if(mods && _modUpdates.TryGetValue(item.Path,out var update))
+                {
+                    var available=RowText($"可更新：{update.CurrentVersion} → {update.LatestVersion}",12,false);available.SetResourceReference(TextBlock.ForegroundProperty,"AccentBrush");text.Children.Add(available);
+                    actions.Children.Add(Button("更新",async()=>await ApplyModUpdatesAsync(new[]{update},notice=>Refresh(notice))));
+                }
                 actions.Children.Add(Button(item.Disabled?"启用":"禁用",()=>{if(CanChange())Refresh(Mutate(new[]{item.Path},_files.Toggle));}));
                 actions.Children.Add(Button("删除",async ()=>await Delete(new[]{item.Path})));
                 var border=new Border{Child=row,BorderThickness=new Thickness(1),CornerRadius=new CornerRadius(6),Margin=new Thickness(0,0,0,10)};border.SetResourceReference(BorderBrushProperty,"PanelBorderBrush");border.SetResourceReference(BackgroundProperty,"PanelBrush");list.Children.Add(border);

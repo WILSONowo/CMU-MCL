@@ -93,6 +93,8 @@ namespace CMUmcl
         public string LaunchActionText { get=>_launchActionText; private set { _launchActionText=value;OnPropertyChanged();OnPropertyChanged(nameof(HasLaunchAction)); } }
         public bool HasLaunchAction => LaunchActionText.Length>0;
         internal void ClearLaunchActionIfIdle(bool running) { if(!running)LaunchActionText=""; }
+        internal const string CrashReportAction="导出崩溃报告";
+        internal void OfferCrashReport() { LaunchActionText=CrashReportAction; }
         internal void GameExited(int? exitCode=null,string? hint=null,bool stoppedByUser=false)
         {
             LaunchActionText="";
