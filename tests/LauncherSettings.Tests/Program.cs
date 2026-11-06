@@ -164,18 +164,19 @@ internal static partial class Program
         await ActivityChecks(window, store);
         Click(window,"SettingsNavButton");Click(window,"RuntimeTab");
         var defaults=(InstanceSettingsView)Get<ContentControl>(window,"GameDefaultsCard").Content;
-        ((TextBox)typeof(InstanceSettingsView).GetField("_width",BindingFlags.NonPublic|BindingFlags.Instance)!.GetValue(defaults)!).Text="1500";
+        var defaultsWidth=(TextBox)typeof(InstanceSettingsView).GetField("_width",BindingFlags.NonPublic|BindingFlags.Instance)!.GetValue(defaults)!;
+        int savedWidth=store.Load().WindowWidth;
+        defaultsWidth.Text="10";
         Click(window,"PacksNavButton");
         window.Close();
         await Until(() => Get<Grid>(window,"InlinePromptOverlay").IsVisible);
-        Check(window.IsVisible && Get<FrameworkElement>(window,"SettingsScroll").IsVisible && store.Load().WindowWidth!=1500,"closing with unsaved game defaults asks before exit");
+        Check(window.IsVisible && Get<FrameworkElement>(window,"SettingsScroll").IsVisible && store.Load().WindowWidth==savedWidth,"closing with an invalid game default asks before exit and writes nothing");
         Click(window,"InlinePromptCancel");await Task.Delay(50);
-        Check(window.IsVisible && defaults.HasUnsavedChanges,"cancelling the close prompt keeps the window and edits");
+        Check(window.IsVisible && defaults.HasUnsavedChanges,"cancelling the close prompt keeps the window and the edit to fix");
+        defaultsWidth.Text="1500";
         window.Close();
-        await Until(() => Get<Grid>(window,"InlinePromptOverlay").IsVisible);
-        Click(window,"InlinePromptContinue");
         await Until(() => !window.IsVisible);
-        Check(store.Load().WindowWidth==1500,"closing can save pending game defaults");
+        Check(store.Load().WindowWidth==1500,"closing saves a valid pending game default without asking");
         File.WriteAllText(Path.Combine(_output,"result.txt"), $"PASS {_checks} checks");
         Console.WriteLine($"PASS {_checks} launcher settings checks; artifacts: {_output}");
     }

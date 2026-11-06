@@ -25,7 +25,6 @@ public partial class MainWindow
     private void LoadPreferenceControls()
     {
         ThemeCombo.SelectedIndex = (int)_settings.Theme;
-        AfterLaunchCombo.SelectedIndex = (int)_settings.AfterLaunch;
         BackgroundModeCombo.SelectedIndex = (int)(_settings.BackgroundMode ?? BackgroundKind.Default);
         BackgroundUrlTextBox.Text = _settings.BackgroundUrl;
         BackgroundOpacitySlider.Value = _settings.BackgroundOpacity * 100;
@@ -46,7 +45,7 @@ public partial class MainWindow
         string tab = button.Name switch { "AppearanceTab" => "Appearance", "ProxyTab" => "Proxy", "StorageTab" => "Storage", "UpdateTab" => "Update", _ => "Runtime" };
         if(tab=="Runtime")EnsureInlineGameSettings();
         foreach (var (element, group) in new (FrameworkElement, string)[] {
-            (GameDefaultsCard,"Runtime"),(AfterLaunchCard,"Runtime"),(AppearanceCard,"Appearance"),
+            (GameDefaultsCard,"Runtime"),(AppearanceCard,"Appearance"),
             (IsolationCard,"Storage"),(DirectoryCard,"Storage"),(InstanceDirectoryCard,"Storage"),
             (PackUpdateCard,"Update"),(LauncherUpdateCard,"Update"),(ProxyCard,"Proxy") })
             element.Visibility = group == tab ? Visibility.Visible : Visibility.Collapsed;

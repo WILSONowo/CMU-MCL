@@ -82,11 +82,13 @@ public partial class MainWindow
     private async void EditorBackRequested()
     {
         var editor=_instanceEditor;if(editor==null)return;
+        editor.FlushPendingSave();
         if(editor.HasUnsavedChanges)
         {
-            var choice=await ShowInlinePromptAsync(editor.IsGlobal?"保存游戏默认设置":"保存实例设置","有尚未保存的修改，是否保存后返回？","保存",true);
-            if(!ReferenceEquals(editor,_instanceEditor) || editor.IsClosed || choice==InlineChoice.Cancel)return;
-            if(choice==InlineChoice.Continue){editor.SaveAndClose();return;}
+            // Settings save on change; what is left failed validation or waits for a running task.
+            var choice=await ShowInlinePromptAsync("设置未保存","部分修改尚未保存（未通过校验或实例正在使用）。仍要返回吗？这些修改将丢失。","仍要返回");
+            if(!ReferenceEquals(editor,_instanceEditor) || editor.IsClosed || choice!=InlineChoice.Continue)return;
+            editor.DiscardPendingChanges();
         }
         editor.Close();
     }

@@ -36,6 +36,17 @@ internal sealed partial class InstanceSettingsView
         finally { _scanningJava = false; if (!IsClosed) _scanJava.IsEnabled = true; }
     }
 
+    // Autosave validates on every change; probing the same unchanged executable once is enough.
+    private (string Path, DateTime Stamp, JavaInfo? Info)? _javaProbe;
+    private JavaInfo? DetectJavaCached(string path)
+    {
+        DateTime stamp; try { stamp = System.IO.File.GetLastWriteTimeUtc(path); } catch { stamp = default; }
+        if (_javaProbe is { } probe && string.Equals(probe.Path, path, StringComparison.OrdinalIgnoreCase) && probe.Stamp == stamp) return probe.Info;
+        var info = JavaLocator.DetectExecutable(path);
+        _javaProbe = (path, stamp, info);
+        return info;
+    }
+
     private JavaInfo? SelectedJava() => _javaCandidates.Items.OfType<JavaInfo>().FirstOrDefault(x => string.Equals(x.JavaPath, _java.Text.Trim(), StringComparison.OrdinalIgnoreCase));
 
     private void UpdateJavaDescription()

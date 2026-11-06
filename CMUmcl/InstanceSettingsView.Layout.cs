@@ -18,18 +18,14 @@ internal sealed partial class InstanceSettingsView
         var scroll = new ScrollViewer { Content = _content, VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Focusable = false };
         var host = new Grid(); host.Children.Add(scroll);
-        _saveButton = InstancePageUi.Button("保存", Save, true);
-        _saveButton.MinWidth = 92; _saveButton.Margin = new Thickness(0);
         if(_inlineGlobal)
         {
             InstancePageUi.Initialize(this);scroll.Content=null;
             var inline=new StackPanel();inline.Children.Add(_content);
-            var footer=new DockPanel{Margin=new Thickness(0,4,10,0)};
-            _saveButton.HorizontalAlignment=HorizontalAlignment.Right;DockPanel.SetDock(_saveButton,Dock.Right);footer.Children.Add(_saveButton);
-            _status.VerticalAlignment=VerticalAlignment.Center;_status.SetResourceReference(TextBlock.ForegroundProperty,"MutedTextBrush");footer.Children.Add(_status);
-            inline.Children.Add(footer);Content=inline;
+            _status.Margin=new Thickness(0,0,10,0);_status.FontSize=12;_status.SetResourceReference(TextBlock.ForegroundProperty,"MutedTextBrush");
+            inline.Children.Add(_status);Content=inline;
         }
-        else InstancePageUi.Shell(this, Title, () => BackRequested?.Invoke(), nav, host, _status, _saveButton);
+        else InstancePageUi.Shell(this, Title, () => BackRequested?.Invoke(), nav, host, _status);
         var game = new StackPanel { Margin = new Thickness(0, 0, 10, 0) };
         var context = new DockPanel { Margin = new Thickness(0, 0, 0, 14), LastChildFill=false, HorizontalAlignment=HorizontalAlignment.Right };
         if (!_global)
@@ -125,6 +121,15 @@ internal sealed partial class InstanceSettingsView
         var sizes = new Grid(); sizes.ColumnDefinitions.Add(new()); sizes.ColumnDefinitions.Add(new());
         var width = new StackPanel { Margin = new Thickness(0, 0, 8, 0) }; var height = new StackPanel { Margin = new Thickness(8, 0, 0, 0) };
         AddField(width, "宽度", _width); AddField(height, "高度", _height); Grid.SetColumn(height, 1); sizes.Children.Add(width); sizes.Children.Add(height); dimensions.Children.Add(sizes);
+        if (_global)
+        {
+            // A launcher preference, but it belongs with the game window options it follows.
+            var afterLaunch = InstancePageUi.Section(_pages[2], "游戏启动后");
+            InstancePageUi.Hint(afterLaunch, "游戏窗口出现后启动器的行为。");
+            _afterLaunch.ItemsSource = new[] { "保持启动器", "最小化，游戏退出后恢复", "关闭启动器" };
+            _afterLaunch.MinHeight = 38; _afterLaunch.ToolTip = "有下载、维护或其他游戏正在启动时不会关闭，改为最小化。";
+            afterLaunch.Children.Add(_afterLaunch);
+        }
 
         var advanced = new Expander { Header = "高级设置", Margin = new Thickness(0, 4, 0, 14), Padding = new Thickness(0, 10, 0, 0) };
         advanced.SetResourceReference(Control.ForegroundProperty, "TextBrush");

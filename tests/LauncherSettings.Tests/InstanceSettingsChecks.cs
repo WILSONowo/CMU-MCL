@@ -54,14 +54,14 @@ internal static partial class Program
                 foreach(double scale in new[]{1d,1.25d,1.5d,2d})
                 {
                     var root=(FrameworkElement)dialog.Content;root.LayoutTransform=new ScaleTransform(scale,scale);dialog.UpdateLayout();await Task.Delay(20);
-                    var save=Descendants(dialog).OfType<Button>().First(b=>Equals(b.Content,"保存"));var bounds=save.TransformToAncestor(root).TransformBounds(new Rect(save.RenderSize));
-                    Check(bounds.Right<=root.ActualWidth+1 && bounds.Bottom<=root.ActualHeight+1 && save.ActualHeight>20,"instance: save action stays within scaled layout "+scale);
+                    var save=Descendants(dialog).OfType<Button>().First(b=>Equals(b.Content,"← 返回"));var bounds=save.TransformToAncestor(root).TransformBounds(new Rect(save.RenderSize));
+                    Check(bounds.Right<=root.ActualWidth+1 && bounds.Bottom<=root.ActualHeight+1 && save.ActualHeight>20,"instance: back action stays within scaled layout "+scale);
                 }
                 ((FrameworkElement)dialog.Content).LayoutTransform=Transform.Identity;dialog.UpdateLayout();
                 Field<CheckBox>(dialog,"_memoryOverride").IsChecked=true;Field<CheckBox>(dialog,"_sizeOverride").IsChecked=true;
                 Field<TextBox>(dialog,"_name").Text="UI saved name";Field<CheckBox>(dialog,"_windowOverride").IsChecked=true;Field<TextBox>(dialog,"_width").Text="1152";Field<TextBox>(dialog,"_height").Text="648";
                 Field<CheckBox>(dialog,"_javaOverride").IsChecked=true;Field<TextBox>(dialog,"_java").Text="";Field<CheckBox>(dialog,"_auto").IsChecked=false;Field<TextBox>(dialog,"_memory").Text="6144";Field<CheckBox>(dialog,"_argsOverride").IsChecked=true;Field<TextBox>(dialog,"_arguments").Text="-Dui.saved=value with spaces";
-                dialog.GetType().GetMethod("Save",BindingFlags.NonPublic|BindingFlags.Instance)!.Invoke(dialog,null);Check(dialog.Saved && InstanceOptionsStore.Load(dir).Name=="UI saved name" && InstanceOptionsStore.Load(dir).Window!.Width==1152,"instance: form save persists name/window");
+                dialog.FlushPendingSave();Check(!dialog.HasUnsavedChanges && InstanceOptionsStore.Load(dir).Name=="UI saved name" && InstanceOptionsStore.Load(dir).Window!.Width==1152,"instance: form edits persist name/window");
                 var effectiveUi=InstanceOptionsStore.Resolve(store.Load(),InstanceOptionsStore.Load(dir));
                 Check(effectiveUi.MaxMemoryMb==6144 && !effectiveUi.AutoMemory && string.IsNullOrWhiteSpace(effectiveUi.JavaPath) && effectiveUi.ExtraJvmArguments.Single()=="-Dui.saved=value with spaces","instance: Java/memory/JVM form edits reach effective launch configuration");
             }

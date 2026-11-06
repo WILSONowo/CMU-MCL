@@ -19,7 +19,6 @@ namespace CMUmcl
         internal Func<bool>? IsMaintenanceBlocked {get;set;}
         internal bool MaintenanceBusy=>_maintenanceBusy;
         private readonly LaunchService? _launch;
-        private Button? _saveButton;
         private readonly ComboBox _gameVersion=new(){IsEditable=true},_loaderKind=new(){ItemsSource=new[]{"vanilla","fabric","forge","neoforge","quilt"}},_loaderVersion=new(){IsEditable=true};
         private readonly Dictionary<string,CheckBox> _syncChecks=new();
         private bool _maintenanceBusy;
@@ -46,7 +45,7 @@ namespace CMUmcl
             for(int i=0;i<InstanceSharing.Names.Length;i++){var box=new CheckBox{Content=InstanceSharing.Labels[i],IsChecked=selected.Contains(InstanceSharing.Names[i]),Margin=new Thickness(0,5,0,9)};_syncChecks.Add(InstanceSharing.Names[i],box);sync.Children.Add(box);}
             sync.Children.Add(Button("立即同步已勾选项目",async ()=>{
                 if(!await Confirm("将使用共享数据替换对应本地文件，原文件保留备份。首次没有共享数据时以此实例初始化。继续？","同步设置") || IsClosed)return;
-                _=RunMaintenance(async ct=>{InstanceMaintenance.EnsureStopped(_directory);var meta=InstanceMaintenance.Read(_directory);var gameDir=GameDirectoryResolver.ResolveGameDirectory(_store.Load(),_directory,meta.Loader);InstanceMaintenance.EnsureStopped(gameDir);var names=_syncChecks.Where(x=>x.Value.IsChecked==true).Select(x=>x.Key).ToArray();await Task.Run(()=>{ct.ThrowIfCancellationRequested();using var sharing=InstanceSharing.Begin(gameDir,names);},ct);},"同步完成。点击保存以启用自动同步。");
+                _=RunMaintenance(async ct=>{InstanceMaintenance.EnsureStopped(_directory);var meta=InstanceMaintenance.Read(_directory);var gameDir=GameDirectoryResolver.ResolveGameDirectory(_store.Load(),_directory,meta.Loader);InstanceMaintenance.EnsureStopped(gameDir);var names=_syncChecks.Where(x=>x.Value.IsChecked==true).Select(x=>x.Key).ToArray();await Task.Run(()=>{ct.ThrowIfCancellationRequested();using var sharing=InstanceSharing.Begin(gameDir,names);},ct);},"同步完成。");
             }));
             AddText(sync,"备份位置：shared-instance-settings/backups");
         }
@@ -62,11 +61,11 @@ namespace CMUmcl
         {
             if(IsClosed || _maintenanceBusy)return;
             if(IsOperationBlocked?.Invoke()==true || IsMaintenanceBlocked?.Invoke()==true){_status.Text="实例正在使用，请结束任务后重试。";return;}
-            _maintenanceBusy=true;_maintenanceCts=new();if(_saveButton!=null)_saveButton.IsEnabled=false;_status.Text="正在处理…";
+            _maintenanceBusy=true;_maintenanceCts=new();_status.Text="正在处理…";
             try{await action(_maintenanceCts.Token);_status.Text=success;}
             catch(OperationCanceledException){_status.Text="已取消。";}
             catch(Exception ex){_status.Text=ex is IOException || ex is LaunchException?ex.Message:"操作失败，原版本记录保留，请检查网络或重试。";}
-            finally{_maintenanceBusy=false;_maintenanceCts.Dispose();_maintenanceCts=null;if(_saveButton!=null)_saveButton.IsEnabled=!_loadFailed;OperationFinished?.Invoke(this,EventArgs.Empty);}
+            finally{_maintenanceBusy=false;_maintenanceCts.Dispose();_maintenanceCts=null;if(HasUnsavedChanges)ScheduleSave();OperationFinished?.Invoke(this,EventArgs.Empty);}
         }
     }
 }

@@ -21,7 +21,7 @@ namespace CMUmcl
         private bool _loadFailed;
         private Button? _javaBrowse;
         private readonly TextBox _name=new(),_java=new(),_memory=new(),_width=new(),_height=new(),_arguments=new();
-        private readonly ComboBox _icon=new();
+        private readonly ComboBox _icon=new(),_afterLaunch=new();
         private readonly CheckBox _javaOverride=new(),_memoryOverride=new(),_windowOverride=new(),_sizeOverride=new(),_argsOverride=new(),_auto=new(){Content="自动分配内存"},_fullscreen=new(){Content="全屏启动"};
         private readonly TextBlock _status=new(){TextWrapping=TextWrapping.Wrap};
         private readonly Grid _content=new();
@@ -33,11 +33,23 @@ namespace CMUmcl
             Title=global?"全局游戏设置":"实例管理 · "+title;
             BuildLayout();
 
-            try{LoadValues();}catch{_loadFailed=true;_status.Text="设置文件无效或无法读取；已禁止保存，请先恢复有效设置文件。";_saveButton.IsEnabled=false;}
+            try{LoadValues();}catch{_loadFailed=true;_status.Text="设置文件无效或无法读取；已停止自动保存，请先恢复有效设置文件。";}
             foreach(var check in OverrideChecks())check.Click+=(_,_)=>RefreshInherited();
             foreach(var check in new[]{_auto,_fullscreen})check.Click+=(_,_)=>UpdateEnabled();UpdateEnabled();
             UpdateJavaDescription();_savedSnapshot=CaptureSettings();
+            // Every edit is saved shortly after it is made; there is no save button.
+            _autoSave=new System.Windows.Threading.DispatcherTimer{Interval=TimeSpan.FromMilliseconds(500)};
+            _autoSave.Tick+=(_,_)=>{_autoSave.Stop();Save();};
+            foreach(var box in new[]{_name,_java,_memory,_width,_height,_arguments})box.TextChanged+=(_,_)=>ScheduleSave();
+            foreach(var combo in new[]{_icon,_afterLaunch})combo.SelectionChanged+=(_,_)=>ScheduleSave();
+            foreach(var check in OverrideChecks().Concat(new[]{_auto,_fullscreen}).Concat(_syncChecks.Values))check.Click+=(_,_)=>ScheduleSave();
         }
+        private readonly System.Windows.Threading.DispatcherTimer _autoSave;
+        private void ScheduleSave(){if(IsClosed||_loadFailed)return;_autoSave.Stop();_autoSave.Start();}
+        /// <summary>Saves pending edits now (leaving the page, closing, tests). Invalid edits stay unsaved with the reason shown.</summary>
+        internal void FlushPendingSave(){_autoSave.Stop();if(HasUnsavedChanges)Save();}
+        /// <summary>Drops edits the user chose to abandon so closing does not try to save them.</summary>
+        internal void DiscardPendingChanges(){_autoSave.Stop();_savedSnapshot=CaptureSettings();}
         internal string Title {get;}
         internal string DirectoryPath=>_directory;
         internal bool IsGlobal=>_global;
@@ -57,8 +69,8 @@ namespace CMUmcl
             _windowOverride.IsChecked,Own(_windowOverride)?_fullscreen.IsChecked:null,
             _sizeOverride.IsChecked,Own(_sizeOverride)?new object?[]{_width.Text,_height.Text}:null,
             _argsOverride.IsChecked,(_global||_argsOverride.IsChecked==true)?_arguments.Text:null,
-            _syncChecks.Where(x=>x.Value.IsChecked==true).Select(x=>x.Key).ToArray()});
-        internal void SaveAndClose()=>Save();
+            _syncChecks.Where(x=>x.Value.IsChecked==true).Select(x=>x.Key).ToArray(),_global?_afterLaunch.SelectedIndex:null});
+        internal void SaveAndClose(){FlushPendingSave();if(!HasUnsavedChanges && !_inlineGlobal)Close();}
         internal void RefreshGlobalIfUnchanged()
         {
             if(!_global || HasUnsavedChanges)return;
@@ -66,7 +78,7 @@ namespace CMUmcl
         }
         internal void Close()
         {
-            if(IsClosed)return;IsClosed=true;_maintenanceCts?.Cancel();_javaScanCts.Cancel();_embeddedContent?.Close();_directoryView?.Close();Closed?.Invoke(this,EventArgs.Empty);
+            if(IsClosed)return;FlushPendingSave();IsClosed=true;_autoSave.Stop();_maintenanceCts?.Cancel();_javaScanCts.Cancel();_embeddedContent?.Close();_directoryView?.Close();Closed?.Invoke(this,EventArgs.Empty);
         }
         private Task<bool> Confirm(string message,string title)=>ConfirmAsync?.Invoke(message,title)??Task.FromResult(false);
         private static void AddText(Panel panel,string text)=>InstancePageUi.Hint(panel,text);
@@ -78,6 +90,7 @@ namespace CMUmcl
             _name.Text=local.Name??"";_icon.SelectedIndex=local.Icon==null?0:Array.IndexOf(InstanceOptionsStore.Icons,local.Icon)+1;
             var checks=OverrideChecks();for(int i=0;i<checks.Length;i++)checks[i].IsChecked=InstanceOptionsStore.UsesOverride(local,InstanceOptionsStore.OverrideKeys[i]);
             foreach(var box in checks)box.Visibility=_global?Visibility.Collapsed:Visibility.Visible;
+            if(_global)_afterLaunch.SelectedIndex=(int)global.AfterLaunch;
             _java.Text=effective.JavaPath??"";_auto.IsChecked=effective.AutoMemory;_memory.Text=effective.MaxMemoryMb.ToString();_width.Text=effective.WindowWidth.ToString();_height.Text=effective.WindowHeight.ToString();_fullscreen.IsChecked=effective.FullScreen;_arguments.Text=string.Join(Environment.NewLine,effective.ExtraJvmArguments??Array.Empty<string>());
         }
         internal void RefreshInherited()
@@ -103,8 +116,9 @@ namespace CMUmcl
         private bool Own(CheckBox check)=>_global||check.IsChecked==true;
         private void Save()
         {
-            if(IsClosed || _loadFailed || _maintenanceBusy)return;
-            if(!_global && IsOperationBlocked?.Invoke()==true){_status.Text="此实例正在处理任务，请完成后保存。";return;}
+            if(IsClosed || _loadFailed || !HasUnsavedChanges)return;
+            if(_maintenanceBusy){ScheduleSave();return;}
+            if(!_global && IsOperationBlocked?.Invoke()==true){_status.Text="实例正在使用，修改会在任务结束后自动保存。";ScheduleSave();return;}
             try
             {
                 var local=new InstanceOptions{SharedSettings=_global?Array.Empty<string>():_syncChecks.Where(x=>x.Value.IsChecked==true).Select(x=>x.Key).ToArray(),Name=string.IsNullOrWhiteSpace(_name.Text)?null:_name.Text.Trim(),Icon=_icon.SelectedIndex>0?InstanceOptionsStore.Icons[_icon.SelectedIndex-1]:null};
@@ -118,7 +132,7 @@ namespace CMUmcl
                     JavaInfo? detected=null;
                     if(Own(_javaOverride)&&!string.IsNullOrEmpty(path))
                     {
-                        detected=JavaLocator.DetectExecutable(path);
+                        detected=DetectJavaCached(path);
                         if(detected is not {Major:>0})throw new InvalidDataException("Java 路径无效或无法识别版本。");
                         if(!detected.IsSupportedArchitecture)throw new InvalidDataException("所选 Java 与本机架构不兼容，请更换运行时。");
                         path=detected.JavaPath;
@@ -139,11 +153,9 @@ namespace CMUmcl
                 }
                 if(_global||_argsOverride.IsChecked==true)local.JvmArguments=_arguments.Text.Split(new[]{'\r','\n'},StringSplitOptions.RemoveEmptyEntries).Select(x=>x.Trim()).Where(x=>x.Length>0).ToArray();
                 InstanceOptionsStore.Validate(local);
-                if(_global){var settings=_store.Load();settings.JavaPath=local.Java!.Path;settings.AutoMemory=local.Java.AutoMemory;settings.MaxMemoryMb=local.Java.MemoryMb;settings.WindowWidth=local.Window!.Width;settings.WindowHeight=local.Window.Height;settings.FullScreen=local.Window.FullScreen;settings.ExtraJvmArguments=local.JvmArguments!;if(!_store.Save(settings))throw new IOException();}
+                if(_global){var settings=_store.Load();settings.JavaPath=local.Java!.Path;settings.AutoMemory=local.Java.AutoMemory;settings.MaxMemoryMb=local.Java.MemoryMb;settings.WindowWidth=local.Window!.Width;settings.WindowHeight=local.Window.Height;settings.FullScreen=local.Window.FullScreen;settings.ExtraJvmArguments=local.JvmArguments!;if(_afterLaunch.SelectedIndex>=0)settings.AfterLaunch=(AfterLaunchAction)_afterLaunch.SelectedIndex;if(!_store.Save(settings))throw new IOException();}
                 else InstanceOptionsStore.Save(_directory,local);
-                Saved=true;
-                if(_inlineGlobal){_savedSnapshot=CaptureSettings();_status.Text="已保存。";SettingsApplied?.Invoke();}
-                else Close();
+                Saved=true;_savedSnapshot=CaptureSettings();_status.Text="已自动保存。";SettingsApplied?.Invoke();
             }
             catch(InvalidDataException ex){_status.Text=ex.Message;}
             catch{_status.Text="保存失败，原设置已保留，请检查目录权限。";}

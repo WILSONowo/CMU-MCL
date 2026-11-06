@@ -37,10 +37,6 @@ public partial class MainWindow
         return true;
     }
     private void RetryPreference_Click(object sender, RoutedEventArgs e) => SavePreference(_ => { });
-    private void AfterLaunch_Changed(object sender, SelectionChangedEventArgs e)
-    {
-        if (AfterLaunchCombo.SelectedIndex >= 0) SavePreference(s => s.AfterLaunch = (AfterLaunchAction)AfterLaunchCombo.SelectedIndex);
-    }
     private void AutoUpdatePacks_Changed(object sender, RoutedEventArgs e)
         => SavePreference(s => s.AutoUpdatePacks = AutoUpdatePacksCheck.IsChecked == true);
 
@@ -48,16 +44,18 @@ public partial class MainWindow
     {
         if (_migrating) { e.Cancel = true; return; }
         if (_closingAfterFlush || _updatingLauncher || !_preferencesReady) return;
+        _globalSettingsInline?.FlushPendingSave();
         if (_globalSettingsInline?.HasUnsavedChanges != true) return;
         e.Cancel = true;
         if (await ResolveUnsavedGameDefaultsAsync("退出")) { _closingAfterFlush = true; Close(); }
     }
 
-    // Game defaults use an explicit save button, unlike the autosaved launcher preferences.
+    // Game defaults save on change; only edits that failed validation can still be pending here.
     // Returns true when the caller may continue (nothing pending, saved, or discarded).
     private async Task<bool> ResolveUnsavedGameDefaultsAsync(string action)
     {
         var editor = _globalSettingsInline;
+        editor?.FlushPendingSave();
         if (editor == null || !editor.HasUnsavedChanges) return true;
         if (_confirmingClose) return false;
         _confirmingClose = true;
@@ -65,11 +63,8 @@ public partial class MainWindow
         {
             ShowSettingsView();
             ShowSettingsTab(RuntimeTab);
-            var choice = await ShowInlinePromptAsync("保存游戏默认设置", $"全局游戏设置有尚未保存的修改，是否保存后{action}？", "保存", true);
-            if (_windowClosed || choice == InlineChoice.Cancel) return false;
-            if (choice == InlineChoice.Discard) return true;
-            editor.SaveAndClose();
-            return !editor.HasUnsavedChanges; // On a validation error the editor shows the reason.
+            var choice = await ShowInlinePromptAsync("设置未保存", $"全局游戏设置中有修改未通过校验，尚未保存。仍要{action}吗？这些修改将丢失。", "仍要" + action);
+            return !_windowClosed && choice == InlineChoice.Continue;
         }
         finally { _confirmingClose = false; }
     }

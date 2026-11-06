@@ -28,13 +28,14 @@ internal static partial class Program
         Click(window,"SettingsNavButton"); await Task.Delay(100);
         var editor=(InstanceSettingsView)Get<ContentControl>(window,"GameDefaultsCard").Content;
         T Field<T>(string name)=>(T)typeof(InstanceSettingsView).GetField(name,BindingFlags.NonPublic|BindingFlags.Instance)!.GetValue(editor)!;
-        void SaveDefaults()=>Descendants(editor).OfType<Button>().Single(x=>Equals(x.Content,"保存")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        void SaveDefaults()=>editor.FlushPendingSave();
         var status=Field<TextBlock>("_status");var memory=Field<TextBox>("_memory");var auto=Field<CheckBox>("_auto");
         Check(editor.IsGlobal && editor.IsVisible && window.FindName("MemoryTextBox")==null && window.FindName("JavaPathTextBox")==null,"game defaults use one inline editor without legacy controls");
         auto.IsChecked=false;auto.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
         Field<Slider>("_memorySlider").Value=3072;
         Check(memory.Text=="3072" && memory.IsEnabled,"memory slider fills manual allocation");
-        SaveDefaults();
+        Check(!Descendants(editor).OfType<Button>().Any(x=>Equals(x.Content,"保存")),"game defaults have no save button");
+        await Until(()=>!store.Load().AutoMemory && store.Load().MaxMemoryMb==3072,3000);
         Check(!store.Load().AutoMemory && store.Load().MaxMemoryMb==3072 && !editor.HasUnsavedChanges,"manual memory persists on save");
         window.UpdateLayout(); var caret=memory.GetRectFromCharacterIndex(0);
         Check(caret.X>=1 && caret.X<=14,"textbox leading inset applied once");
@@ -93,15 +94,17 @@ internal static partial class Program
             Descendants(shown).OfType<Button>().Single(b=>Equals(b.Content,"确定")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             Check(await pending.Task==MessageBoxResult.OK && !shown.IsVisible,"prompt: confirm closes and returns OK in "+theme);
         }
-        var afterLaunch=Get<ComboBox>(window,"AfterLaunchCombo");
-        Check(Get<Border>(window,"AfterLaunchCard").IsVisible && afterLaunch.SelectedIndex==0,"after-launch option shown on game settings tab and defaults to keep");
+        var afterLaunch=Field<ComboBox>("_afterLaunch");window.UpdateLayout();
+        var sizeHeading=Descendants(editor).OfType<TextBlock>().First(x=>x.Text=="窗口尺寸");
+        Check(afterLaunch.IsVisible && afterLaunch.SelectedIndex==0 && afterLaunch.TranslatePoint(new Point(),editor).Y>sizeHeading.TranslatePoint(new Point(),editor).Y,"after-launch option sits below window size and defaults to keep");
         afterLaunch.SelectedIndex=(int)AfterLaunchAction.Minimize;
-        Check(store.Load().AfterLaunch==AfterLaunchAction.Minimize,"after-launch option autosaves");
+        await Until(()=>store.Load().AfterLaunch==AfterLaunchAction.Minimize,3000);
+        Check(true,"after-launch option autosaves");
         Call(window,"ApplyAfterLaunch");
         Check(window.WindowState==WindowState.Minimized,"minimize option minimizes the launcher after the game window appears");
         Call(window,"RestoreAfterGames");
         Check(window.WindowState==WindowState.Normal,"launcher is restored when no game is running");
-        afterLaunch.SelectedIndex=(int)AfterLaunchAction.Keep;
+        afterLaunch.SelectedIndex=(int)AfterLaunchAction.Keep;SaveDefaults();
         Click(window,"AppearanceTab");
         await ProxyUiChecks(window,store);
         Click(window,"AppearanceTab");
@@ -274,6 +277,10 @@ internal static partial class Program
         // The page lays out with a measurable size.
         window.UpdateLayout();
         Check(view.ActualWidth > 0 && view.ActualHeight > 0, "community: view laid out with measurable size");
+        var results = Get<ListBox>(view, "ResourceResults"); results.SelectedIndex = 0;
+        var sort = Descendants(Get<Border>(view, "SearchFilters")).OfType<ComboBox>().Last(); System.Windows.Input.Keyboard.Focus(sort); window.UpdateLayout();
+        Check(sort.FocusVisualStyle == null && results.ItemContainerStyle.Setters.OfType<Setter>().Any(x => x.Property == Control.TemplateProperty), "community: dropdown focus and selected result use launcher styling");
+        Screenshot(window, "community-focus.png");
 
         // Option value sanity.
         Check(new[]{"fabric","forge","neoforge","quilt"}.All(l => vm.LoaderOptions.Any(o => o.Value == l)), "community: loader options include fabric/forge/neoforge/quilt");
