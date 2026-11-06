@@ -20,6 +20,15 @@ internal sealed partial class InstanceSettingsView
             combo.ItemsPanel = new ItemsPanelTemplate(new FrameworkElementFactory(typeof(VirtualizingStackPanel)));
             VirtualizingPanel.SetIsVirtualizing(combo, true);
         }
+        // Like a launcher download list: every version, newest first, with its type and date.
+        System.Windows.Controls.TextSearch.SetTextPath(_gameVersion, nameof(VersionChoice.Name));
+        _gameVersion.ItemTemplate = (DataTemplate)System.Windows.Markup.XamlReader.Parse(
+            "<DataTemplate xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation'>" +
+            "<DockPanel><TextBlock DockPanel.Dock='Right' Text='{Binding Detail}' Margin='16,0,0,0' FontSize='12' Foreground='{DynamicResource MutedTextBrush}' VerticalAlignment='Center'/>" +
+            "<TextBlock Text='{Binding Name}' VerticalAlignment='Center'/></DockPanel></DataTemplate>");
+        var itemStyle = new Style(typeof(ComboBoxItem), TryFindResource(typeof(ComboBoxItem)) as Style);
+        itemStyle.Setters.Add(new Setter(Control.HorizontalContentAlignmentProperty, HorizontalAlignment.Stretch));
+        _gameVersion.ItemContainerStyle = itemStyle;
         _gameVersion.Text = metadata?.Game ?? "";
         _lastGameVersion = _gameVersion.Text.Trim();
         _loaderKind.SelectedItem = string.IsNullOrEmpty(metadata?.Loader) ? "vanilla" : metadata!.Loader;
@@ -38,7 +47,7 @@ internal sealed partial class InstanceSettingsView
     }
 
     // An editable ComboBox raises SelectionChanged before Text follows the new item.
-    private string CurrentGameVersion => ((_gameVersion.SelectedItem as string) ?? _gameVersion.Text).Trim();
+    private string CurrentGameVersion => ((_gameVersion.SelectedItem as VersionChoice)?.Name ?? _gameVersion.Text).Trim();
 
     private bool IsVanilla => (_loaderKind.SelectedItem as string ?? "vanilla") == "vanilla";
 
@@ -60,13 +69,13 @@ internal sealed partial class InstanceSettingsView
     {
         if (_gameListLoaded || IsClosed) return;
         if (!quiet) _status.Text = "正在加载版本列表…";
-        string[] values;
-        try { values = await VersionChoices.GameVersionsAsync(); } catch { values = Array.Empty<string>(); }
+        VersionChoice[] values;
+        try { values = await VersionChoices.GameVersionsAsync(); } catch { values = Array.Empty<VersionChoice>(); }
         if (IsClosed || _gameListLoaded) return;
         if (values.Length == 0) { if (!quiet) _status.Text = "无法获取版本列表，可直接输入版本号。"; return; }
         string text = _gameVersion.Text.Trim();
-        // Keep a snapshot or custom version the instance already uses.
-        _gameVersion.ItemsSource = text.Length > 0 && !values.Contains(text) ? new[] { text }.Concat(values).ToArray() : values;
+        // Keep a custom version the instance already uses (for example a modified client).
+        _gameVersion.ItemsSource = text.Length > 0 && !values.Any(v => v.Name == text) ? new[] { new VersionChoice(text, "当前版本", "") }.Concat(values).ToArray() : values;
         _gameVersion.Text = text;
         _gameListLoaded = true;
         if (!quiet) _status.Text = "";

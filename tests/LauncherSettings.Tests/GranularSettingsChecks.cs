@@ -59,23 +59,32 @@ internal static partial class Program
         view.SaveAndClose();var saved=InstanceOptionsStore.Load(directory);
         Check(view.Saved && saved.OverrideProperties!.SequenceEqual(new[]{"windowSize"}),"granular: UI saves only chosen override keys");
         // Version pickers load their own lists; vanilla has no loader build.
-        VersionChoices.Override=(loader,game)=>Task.FromResult(loader==null?new[]{"1.21.1","1.20.4"}:game=="1.21.1"?new[]{"0.16.10","0.16.9"}:new[]{"0.15.0"});
+        VersionChoices.GameOverride=()=>Task.FromResult(new[]{new VersionChoice("1.21.1","正式版","2024-08-08"),new VersionChoice("24w14potato","愚人节","2024-04-01"),new VersionChoice("1.20.4","正式版","2023-12-07"),new VersionChoice("b1.7.3","远古版本","2011-07-08")});
+        VersionChoices.Override=(loader,game)=>Task.FromResult(game=="1.21.1"?new[]{"0.16.10","0.16.9"}:new[]{"0.15.0"});
         try
         {
             var picker=new InstanceSettingsView(directory,"Version fixture",store){Width=850,Height=650};picker.Show();await Task.Delay(30);
             Descendants(picker).OfType<ListBox>().First().SelectedIndex=1;await Task.Delay(80);picker.UpdateLayout();
             T PickerField<T>(string name)=>(T)picker.GetType().GetField(name,BindingFlags.NonPublic|BindingFlags.Instance)!.GetValue(picker)!;
             var game=PickerField<ComboBox>("_gameVersion");var kind=PickerField<ComboBox>("_loaderKind");var loaderVersion=PickerField<ComboBox>("_loaderVersion");
-            Check(game.Items.Count==2 && !Descendants(picker).OfType<Button>().Any(x=>x.Content is string s&&s.StartsWith("获取")),"versions: list loads with the tab, no fetch buttons");
+            Check(game.Items.Count==4 && game.Items.OfType<VersionChoice>().Any(v=>v.Tag=="愚人节") && game.Items.OfType<VersionChoice>().Any(v=>v.Tag=="远古版本") && game.Text=="1.21.1" && !Descendants(picker).OfType<Button>().Any(x=>x.Content is string s&&s.StartsWith("获取")),"versions: list loads with the tab and includes every version type");
+            game.IsDropDownOpen=true;await Task.Delay(80);picker.UpdateLayout();
+            var firstItem=(DependencyObject)game.ItemContainerGenerator.ContainerFromIndex(0);
+            Check(firstItem!=null && Descendants(firstItem).OfType<TextBlock>().Any(t=>t.Text=="正式版 · 2024-08-08"),"versions: dropdown shows each version's type and date");
+            var dropDown=(FrameworkElement)((System.Windows.Controls.Primitives.Popup)game.Template.FindName("PART_Popup",game)).Child;
+            var shot=new System.Windows.Media.Imaging.RenderTargetBitmap((int)Math.Ceiling(dropDown.ActualWidth),(int)Math.Ceiling(dropDown.ActualHeight),96,96,System.Windows.Media.PixelFormats.Pbgra32);shot.Render(dropDown);
+            var png=new System.Windows.Media.Imaging.PngBitmapEncoder();png.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(shot));using(var file=File.Create(Path.Combine(_output,"version-dropdown.png")))png.Save(file);
+            game.IsDropDownOpen=false;
             kind.SelectedItem="vanilla";await Task.Delay(20);
             Check(!loaderVersion.IsEnabled && loaderVersion.Text=="","versions: vanilla clears and disables loader version");
             kind.SelectedItem="fabric";await Until(()=>loaderVersion.Text=="0.16.10");
             Check(loaderVersion.IsEnabled && loaderVersion.Items.Count==2,"versions: choosing a loader selects its newest compatible build");
-            game.SelectedItem="1.20.4";await Until(()=>loaderVersion.Text=="0.15.0");
+            game.SelectedItem=game.Items.OfType<VersionChoice>().Single(v=>v.Name=="1.20.4");await Until(()=>loaderVersion.Text=="0.15.0");
+            Check(game.Text=="1.20.4","versions: choosing an entry puts the plain version id in the field");
             Check(true,"versions: changing game version re-picks a compatible loader build");
             picker.Close();
         }
-        finally { VersionChoices.Override=null; }
+        finally { VersionChoices.Override=null;VersionChoices.GameOverride=null; }
         Click(owner,"SettingsNavButton");Click(owner,"RuntimeTab");owner.UpdateLayout();
         var editor=(InstanceSettingsView)Get<ContentControl>(owner,"GameDefaultsCard").Content;
         Check(editor.IsGlobal && editor.IsVisible && !Get<ContentControl>(owner,"InstanceSettingsHost").IsVisible,"global: settings render inline without changing page");
