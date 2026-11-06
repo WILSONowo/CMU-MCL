@@ -39,9 +39,7 @@ namespace CMUmcl
                     {
                         _reauthentication ??= PromptForLaunchLoginAsync();
                         var pending = _reauthentication;
-                        AuthSession? restored;
-                        try { restored = await pending; }
-                        finally { if (ReferenceEquals(_reauthentication, pending) && pending.IsCompleted) _reauthentication = null; }
+                        var restored = await WaitForLaunchLoginAsync(pending, ct);
                         ct.ThrowIfCancellationRequested();
                         if (restored == null) throw new OperationCanceledException();
                     }
@@ -49,19 +47,34 @@ namespace CMUmcl
             }
         }
 
+        private static async Task<AuthSession?> WaitForLaunchLoginAsync(Task<AuthSession?> pending, CancellationToken ct)
+        {
+            var cancelled = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            using (ct.Register(() => cancelled.TrySetResult(true)))
+            {
+                await Task.WhenAny(pending, cancelled.Task);
+                ct.ThrowIfCancellationRequested();
+                return await pending;
+            }
+        }
+
         private async Task<AuthSession?> PromptForLaunchLoginAsync()
         {
             // Yield before opening a modal so the shared task is assigned first.
             await Task.Yield();
-            if (_windowClosed) return null;
-            var restored = await ReauthenticateForLaunch!();
-            if (restored != null && !_windowClosed)
+            try
             {
-                _session = restored;
-                AccountNameText.Text = restored.SelectedProfileName;
-                _ = LoadAccountAvatarAsync(true);
+                if (_windowClosed) return null;
+                var restored = await ReauthenticateForLaunch!();
+                if (restored != null && !_windowClosed)
+                {
+                    _session = restored;
+                    AccountNameText.Text = restored.SelectedProfileName;
+                    _ = LoadAccountAvatarAsync(true);
+                }
+                return restored;
             }
-            return restored;
+            finally { _reauthentication = null; }
         }
     }
 }

@@ -87,6 +87,14 @@ jobs:
           & tests/Bottom.Tests/bin/Release/net48/CMUmcl.LauncherSettings.Tests.exe
           if ($LASTEXITCODE -ne 0) { throw 'Bottom tests failed' }
 
+      - name: Login recovery regression tests
+        shell: pwsh
+        run: |
+          dotnet build tests/LauncherSettings.Tests/LauncherSettings.Tests.csproj -c Release --nologo
+          if ($LASTEXITCODE -ne 0) { throw 'Login recovery test build failed' }
+          & tests/LauncherSettings.Tests/bin/Release/net48/CMUmcl.LauncherSettings.Tests.exe $env:GITHUB_WORKSPACE (Join-Path $env:RUNNER_TEMP 'login-recovery-tests') --auth-recovery
+          if ($LASTEXITCODE -ne 0) { throw 'Login recovery tests failed' }
+
       - name: Build public (no-key) client
         shell: pwsh
         run: |

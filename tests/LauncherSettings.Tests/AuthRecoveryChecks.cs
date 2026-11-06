@@ -56,6 +56,41 @@ internal static partial class Program
             Check(attempts == 4 && both.All(x => x.Session == fresh), "concurrent pending launches both resume with reauthenticated session");
 
             field.SetValue(window, old); attempts = prompts = 0;
+            var sharedLogin = new TaskCompletionSource<AuthSession?>(TaskCreationOptions.RunContinuationsAsynchronously);
+            window.ReauthenticateForLaunch = () => { prompts++; return sharedLogin.Task; };
+            using (var cancelledWaiter = new CancellationTokenSource())
+            {
+                var cancelledLaunch = window.LaunchWithLoginRecoveryAsync(vm, null, cancelledWaiter.Token);
+                var survivingLaunch = window.LaunchWithLoginRecoveryAsync(vm, null, default);
+                await Until(() => prompts == 1);
+                cancelledWaiter.Cancel();
+                await Until(() => cancelledLaunch.IsCompleted);
+                try { await cancelledLaunch; throw new Exception("cancelled waiter was not cancelled"); }
+                catch (OperationCanceledException) { }
+                Check(!sharedLogin.Task.IsCompleted && !survivingLaunch.IsCompleted && attempts == 2,
+                    "one cancelled launch exits promptly without cancelling shared login or other launch");
+                sharedLogin.SetResult(fresh);
+                Check((await survivingLaunch).Session == fresh && attempts == 3 && prompts == 1,
+                    "remaining launch continues after shared login with no duplicate game attempt");
+            }
+
+            field.SetValue(window, old); attempts = prompts = 0;
+            var abandonedLogin = new TaskCompletionSource<AuthSession?>(TaskCreationOptions.RunContinuationsAsynchronously);
+            window.ReauthenticateForLaunch = () => { prompts++; return abandonedLogin.Task; };
+            using (var abandoned = new CancellationTokenSource())
+            {
+                var abandonedLaunch = window.LaunchWithLoginRecoveryAsync(vm, null, abandoned.Token);
+                await Until(() => prompts == 1); abandoned.Cancel();
+                try { await abandonedLaunch; throw new Exception("abandoned launch was not cancelled"); }
+                catch (OperationCanceledException) { }
+                abandonedLogin.SetResult(null);
+                await Until(() => typeof(MainWindow).GetField("_reauthentication", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(window) == null);
+            }
+            window.ReauthenticateForLaunch = () => { prompts++; return Task.FromResult<AuthSession?>(fresh); };
+            Check((await window.LaunchWithLoginRecoveryAsync(vm, null, default)).Session == fresh && prompts == 2,
+                "completed abandoned login does not poison the next recovery attempt");
+
+            field.SetValue(window, old); attempts = prompts = 0;
             var slow = new TaskCompletionSource<LaunchResult>(TaskCreationOptions.RunContinuationsAsynchronously);
             window.ReauthenticateForLaunch = () => { prompts++; return Task.FromResult<AuthSession?>(fresh); };
             window._launchOverride = (_, _) => ++attempts == 1 ? slow.Task : Session() == old ? Task.FromException<LaunchResult>(Expired()) : Task.FromResult(Result(Session()));
