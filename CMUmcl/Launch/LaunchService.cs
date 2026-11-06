@@ -30,8 +30,7 @@ namespace CMUmcl.Launch
         private const string UnsupportedLoaderMessage = "不支持的加载器类型。当前版本支持原版/Fabric/Forge/NeoForge/Quilt。";
         private const string AuthlibInjectorSha256 = "9C7F4343E6C82034958FFB48C14A2CB0C85928BE7283103CE17DA00C6D5A7B10";
 
-        private readonly YggdrasilClient _yggdrasil;
-        private readonly AuthStore _authStore;
+        private readonly AuthSessionGate _sessions;
         private readonly InstalledStateStore _installedState;
         private readonly SettingsStore _settingsStore;
         private readonly HttpClient _http;
@@ -42,8 +41,7 @@ namespace CMUmcl.Launch
             InstalledStateStore installedState,
             SettingsStore settingsStore)
         {
-            _yggdrasil = yggdrasil;
-            _authStore = authStore;
+            _sessions = new AuthSessionGate(yggdrasil, authStore);
             _installedState = installedState;
             _settingsStore = settingsStore;
             _http = new HttpClient(CMUmcl.Network.LauncherProxy.CreateHandler());
@@ -186,68 +184,85 @@ namespace CMUmcl.Launch
             CancellationToken ct)
         {
             InstanceMaintenance.EnsureStopped(instanceDir);
-            // Validate/refresh the session before launching.
-            session = await EnsureValidSessionAsync(session, progress, ct).ConfigureAwait(false);
-
             // Prepare authlib-injector.
             progress?.Report(new LaunchProgress { Stage = "准备", Message = "正在准备 authlib-injector…" });
             string authlibJar = EnsureAuthlibInjector();
 
             PreparedInstall prepared = await PrepareCoreAsync(instanceDir, metadata, progress, ct).ConfigureAwait(false);
 
-            // Build MSession.
-            var mSession = new MSession(session.SelectedProfileName, session.AccessToken, session.SelectedProfileId);
-
-            // Build MLaunchOption.
-            string gameDir = GameDirectoryResolver.ResolveGameDirectory(prepared.Settings, instanceDir, prepared.Loader);
-            Directory.CreateDirectory(gameDir);
-            InstanceMaintenance.EnsureStopped(gameDir);
-
-            var option = new MLaunchOption
+            // Resource downloads are complete before entering the authentication gate.
+            progress?.Report(new LaunchProgress { Stage = "校验登录", Message = "正在校验并刷新登录状态…" });
+            var started = await RunAuthenticatedLaunchAsync(session, async current =>
             {
-                Session = mSession,
-                Path = prepared.Launcher.MinecraftPath,
-                JavaPath = prepared.Java.JavaPath,
-                MaximumRamMb = MemoryAllocation.Resolve(prepared.Settings, prepared.Java, MemorySnapshot.Read()),
-                MinimumRamMb = 512,
-                GameLauncherName = "CMUmcl",
-                GameLauncherVersion = "0.1.0",
-                ArgumentDictionary = new Dictionary<string, string>
+                // Build MSession.
+                var mSession = new MSession(current.SelectedProfileName, current.AccessToken, current.SelectedProfileId);
+
+                // Build MLaunchOption.
+                string gameDir = GameDirectoryResolver.ResolveGameDirectory(prepared.Settings, instanceDir, prepared.Loader);
+                Directory.CreateDirectory(gameDir);
+                InstanceMaintenance.EnsureStopped(gameDir);
+
+                var option = new MLaunchOption
                 {
-                    ["game_directory"] = gameDir,
-                },
-            };
+                    Session = mSession,
+                    Path = prepared.Launcher.MinecraftPath,
+                    JavaPath = prepared.Java.JavaPath,
+                    MaximumRamMb = MemoryAllocation.Resolve(prepared.Settings, prepared.Java, MemorySnapshot.Read()),
+                    MinimumRamMb = 512,
+                    GameLauncherName = "CMUmcl",
+                    GameLauncherVersion = "0.1.0",
+                    ArgumentDictionary = new Dictionary<string, string>
+                    {
+                        ["game_directory"] = gameDir,
+                    },
+                };
 
-            option.ExtraJvmArguments = MLaunchOption.DefaultExtraJvmArguments
-                .Append(new MArgument($"-javaagent:{authlibJar}={YggdrasilClient.ApiRoot}"));
+                option.ExtraJvmArguments = MLaunchOption.DefaultExtraJvmArguments
+                    .Append(new MArgument($"-javaagent:{authlibJar}={YggdrasilClient.ApiRoot}"));
 
-            InstanceOptionsStore.ApplyLaunchOptions(option, prepared.Settings);
+                InstanceOptionsStore.ApplyLaunchOptions(option, prepared.Settings);
 
-            // Quick play only when the server is not a local/loopback placeholder.
-            string serverAddress = metadata.ServerAddress ?? string.Empty;
-            if (!string.IsNullOrWhiteSpace(serverAddress)
-                && !string.Equals(serverAddress, "127.0.0.1", StringComparison.OrdinalIgnoreCase)
-                && !string.Equals(serverAddress, "localhost", StringComparison.OrdinalIgnoreCase))
-            {
-                option.ServerIp = serverAddress;
-                option.ServerPort = metadata.ServerPort;
-            }
+                // Quick play only when the server is not a local/loopback placeholder.
+                string serverAddress = metadata.ServerAddress ?? string.Empty;
+                if (!string.IsNullOrWhiteSpace(serverAddress)
+                    && !string.Equals(serverAddress, "127.0.0.1", StringComparison.OrdinalIgnoreCase)
+                    && !string.Equals(serverAddress, "localhost", StringComparison.OrdinalIgnoreCase))
+                {
+                    option.ServerIp = serverAddress;
+                    option.ServerPort = metadata.ServerPort;
+                }
 
-            // Build and start the process.
-            progress?.Report(new LaunchProgress { Stage = "启动", Message = "正在构建启动进程…" });
-            Process process = await prepared.Launcher.BuildProcessAsync(prepared.VersionName, option, ct).ConfigureAwait(false);
+                // Build and start the process.
+                progress?.Report(new LaunchProgress { Stage = "启动", Message = "正在构建启动进程…" });
+                Process process = await prepared.Launcher.BuildProcessAsync(prepared.VersionName, option, ct).ConfigureAwait(false);
 
-            GameProcessDiagnostics diagnostics = GameProcessDiagnostics.Prepare(process);
-            var sharing=await Task.Run(()=>InstanceSharing.Begin(gameDir,InstanceOptionsStore.Load(instanceDir).SharedSettings),ct);
-            try { ct.ThrowIfCancellationRequested();process.Start();InstanceMaintenance.RecordRunning(instanceDir,process);InstanceMaintenance.RecordRunning(gameDir,process);sharing?.Attach(process); }
-            catch { try{if(!process.HasExited)process.Kill();}catch{ } sharing?.Dispose();throw; }
-            diagnostics.BeginRead();
+                GameProcessDiagnostics diagnostics = GameProcessDiagnostics.Prepare(process);
+                var sharing=await Task.Run(()=>InstanceSharing.Begin(gameDir,InstanceOptionsStore.Load(instanceDir).SharedSettings),ct);
+                try {
+                    // Process construction/sharing can take time. Never start with a token
+                    // rejected after those operations, even if the earlier check passed.
+                    await _sessions.StartAsync(current, () =>
+                    {
+                        process.Start();
+                        InstanceMaintenance.RecordRunning(instanceDir, process);
+                        InstanceMaintenance.RecordRunning(gameDir, process);
+                        sharing?.Attach(process);
+                        return true;
+                    }, ct).ConfigureAwait(false);
+                }
+                catch { try{if(!process.HasExited)process.Kill();}catch{ } sharing?.Dispose();throw; }
+                diagnostics.BeginRead();
+                return (Process: process, Diagnostics: diagnostics, Session: current);
+            }, ct).ConfigureAwait(false);
+            Process gameProcess = started.Process;
+            GameProcessDiagnostics gameDiagnostics = started.Diagnostics;
+            session = started.Session;
 
             // Wait for the actual game window (owned by the same Java process) before
             // claiming the game has started. Java may take a while to boot the LWJGL window.
             progress?.Report(new LaunchProgress { Stage = "启动中", Message = "游戏进程已启动，正在等待游戏窗口。" });
 
-            bool windowDetected=await WaitForOwnedGameAsync(process,ct,diagnostics.Describe).ConfigureAwait(false);
+            bool windowDetected=await WaitForOwnedGameAsync(gameProcess,ct,gameDiagnostics.Describe).ConfigureAwait(false);
 
             if (windowDetected)
             {
@@ -260,7 +275,7 @@ namespace CMUmcl.Launch
 
             return new LaunchResult
             {
-                Process = process,
+                Process = gameProcess,
                 Session = session,
                 VersionName = prepared.VersionName,
                 WindowDetected = windowDetected,
@@ -533,52 +548,14 @@ namespace CMUmcl.Launch
             public string Loader = string.Empty;
         }
 
-        private async Task<AuthSession> EnsureValidSessionAsync(
-            AuthSession session,
-            IProgress<LaunchProgress>? progress,
-            CancellationToken ct)
+        private async Task<T> RunAuthenticatedLaunchAsync<T>(AuthSession session, Func<AuthSession, Task<T>> start, CancellationToken ct)
         {
-            progress?.Report(new LaunchProgress { Stage = "校验登录", Message = "正在校验登录状态…" });
-
-            bool valid;
-            try
-            {
-                valid = await _yggdrasil.ValidateAsync(session.AccessToken, session.ClientToken, ct).ConfigureAwait(false);
-            }
-            catch (YggdrasilException ex)
-            {
-                throw new LaunchException("无法校验登录状态：" + ex.Message);
-            }
-
-            if (valid)
-            {
-                session.SavedAt = DateTimeOffset.UtcNow;
-                return session;
-            }
-
-            // 403 -> refresh.
-            try
-            {
-                RefreshResult refreshed = await _yggdrasil.RefreshAsync(session.AccessToken, session.ClientToken, ct).ConfigureAwait(false);
-
-                var updated = new AuthSession
-                {
-                    ClientToken = string.IsNullOrWhiteSpace(refreshed.ClientToken) ? session.ClientToken : refreshed.ClientToken,
-                    AccessToken = refreshed.AccessToken,
-                    SelectedProfileId = refreshed.SelectedProfile?.Id ?? session.SelectedProfileId,
-                    SelectedProfileName = refreshed.SelectedProfile?.Name ?? session.SelectedProfileName,
-                    Username = refreshed.User?.Username ?? session.Username,
-                    SavedAt = DateTimeOffset.UtcNow,
-                };
-
-                _authStore.SaveSession(updated);
-                return updated;
-            }
-            catch (YggdrasilException)
-            {
-                throw new LaunchException("登录已过期，请重新登录。");
-            }
+            try { return await _sessions.RunAsync(session, start, ct).ConfigureAwait(false); }
+            catch (YggdrasilException ex) { throw new LaunchException("无法确认登录状态：" + ex.Message); }
         }
+
+        internal Task<AuthSession> EnsureValidSessionAsync(AuthSession session, CancellationToken ct = default)
+            => _sessions.RunAsync(session, current => Task.FromResult(current), ct);
 
         private string EnsureAuthlibInjector()
         {

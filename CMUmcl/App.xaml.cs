@@ -97,43 +97,11 @@ namespace CMUmcl
 
             try
             {
-                bool valid = _client!.ValidateAsync(saved.AccessToken, saved.ClientToken)
-                    .GetAwaiter().GetResult();
-                if (valid)
-                {
-                    saved.SavedAt = DateTimeOffset.UtcNow;
-                    return saved;
-                }
+                return _launchService!.EnsureValidSessionAsync(saved).GetAwaiter().GetResult();
             }
             catch (YggdrasilException)
             {
-                // Fall through to refresh attempt.
-            }
-
-            // Token invalid (403) or unavailable — try refreshing.
-            try
-            {
-                RefreshResult refreshed = _client!.RefreshAsync(saved.AccessToken, saved.ClientToken)
-                    .GetAwaiter().GetResult();
-
-                var updated = new AuthSession
-                {
-                    ClientToken = string.IsNullOrWhiteSpace(refreshed.ClientToken)
-                        ? saved.ClientToken
-                        : refreshed.ClientToken,
-                    AccessToken = refreshed.AccessToken,
-                    SelectedProfileId = refreshed.SelectedProfile?.Id ?? saved.SelectedProfileId,
-                    SelectedProfileName = refreshed.SelectedProfile?.Name ?? saved.SelectedProfileName,
-                    Username = refreshed.User?.Username ?? saved.Username,
-                    SavedAt = DateTimeOffset.UtcNow,
-                };
-
-                _store.SaveSession(updated);
-                return updated;
-            }
-            catch (YggdrasilException)
-            {
-                // Refresh failed — the saved session is unusable.
+                // Do not admit an unverified refresh response into the main window.
             }
 
             _store.ClearSession();

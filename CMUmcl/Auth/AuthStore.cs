@@ -15,6 +15,7 @@ namespace CMUmcl.Auth
     /// </summary>
     public sealed class AuthStore
     {
+        private static readonly object Sync = new object();
         private static string DirectoryPath => LauncherPaths.RootDirectory;
         private static string FilePath => Path.Combine(DirectoryPath, "auth.dat");
 
@@ -34,38 +35,65 @@ namespace CMUmcl.Auth
         /// <summary>Gets the persisted client token, or creates and persists a new stable GUID if missing.</summary>
         public string GetOrCreateClientToken()
         {
-            var data = LoadStoredData();
-            if (!string.IsNullOrWhiteSpace(data?.ClientToken))
-                return data.ClientToken!;
+            lock (Sync)
+            {
+                var data = LoadStoredData();
+                if (!string.IsNullOrWhiteSpace(data?.ClientToken))
+                    return data.ClientToken!;
 
-            string token = Guid.NewGuid().ToString("D");
-            var updated = data ?? new StoredData();
-            updated.ClientToken = token;
-            SaveStoredData(updated);
-            return token;
+                string token = Guid.NewGuid().ToString("D");
+                var updated = data ?? new StoredData();
+                updated.ClientToken = token;
+                SaveStoredData(updated);
+                return token;
+            }
         }
 
         /// <summary>Loads the saved session, or null if there is none or it is unreadable.</summary>
         public AuthSession? LoadSession()
         {
-            return LoadStoredData()?.Session;
+            lock (Sync)
+            {
+                return LoadStoredData()?.Session;
+            }
         }
 
         /// <summary>Saves the session (remember-login). Also persists the current client token.</summary>
         public void SaveSession(AuthSession session)
         {
-            var data = LoadStoredData() ?? new StoredData();
-            data.ClientToken = string.IsNullOrWhiteSpace(data.ClientToken) ? session.ClientToken : data.ClientToken;
-            data.Session = session;
-            SaveStoredData(data);
+            lock (Sync)
+            {
+                var data = LoadStoredData() ?? new StoredData();
+                data.ClientToken = string.IsNullOrWhiteSpace(data.ClientToken) ? session.ClientToken : data.ClientToken;
+                data.Session = session;
+                SaveStoredData(data);
+            }
         }
 
         /// <summary>Clears any saved session while preserving the stable client token.</summary>
         public void ClearSession()
         {
-            var data = LoadStoredData() ?? new StoredData();
-            data.Session = null;
-            SaveStoredData(data);
+            lock (Sync)
+            {
+                var data = LoadStoredData() ?? new StoredData();
+                data.Session = null;
+                SaveStoredData(data);
+            }
+        }
+
+        internal bool TryReplaceSession(AuthSession expected, AuthSession updated)
+        {
+            lock (Sync)
+            {
+                var data = LoadStoredData();
+                if (data?.Session == null || data.Session.AccessToken != expected.AccessToken
+                    || data.Session.ClientToken != expected.ClientToken
+                    || data.Session.SelectedProfileId != expected.SelectedProfileId)
+                    return false;
+                data.Session = updated;
+                SaveStoredData(data);
+                return true;
+            }
         }
 
         private static StoredData? LoadStoredData()

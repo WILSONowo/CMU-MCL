@@ -77,10 +77,10 @@ namespace CMUmcl.Auth
 
         private readonly HttpClient _http;
 
-        public YggdrasilClient()
-        {
-            var handler = CMUmcl.Network.LauncherProxy.CreateHandler();
+        public YggdrasilClient() : this(CMUmcl.Network.LauncherProxy.CreateHandler()) { }
 
+        internal YggdrasilClient(HttpMessageHandler handler)
+        {
             _http = new HttpClient(handler)
             {
                 Timeout = TimeSpan.FromSeconds(20),
@@ -178,7 +178,7 @@ namespace CMUmcl.Auth
             {
                 throw new YggdrasilException("网络错误，无法连接皮肤站，请检查网络连接。");
             }
-            catch (TaskCanceledException)
+            catch (TaskCanceledException) when (!ct.IsCancellationRequested)
             {
                 throw new YggdrasilException("连接皮肤站超时，请稍后再试。");
             }
@@ -187,13 +187,15 @@ namespace CMUmcl.Auth
         /// <summary>
         /// Refreshes an access token. Returns the new token and selected profile.
         /// </summary>
-        public async Task<RefreshResult> RefreshAsync(string accessToken, string clientToken, CancellationToken ct = default)
+        public async Task<RefreshResult> RefreshAsync(string accessToken, string clientToken, CancellationToken ct = default,
+            YggdrasilProfile? selectedProfile = null)
         {
             var payload = new
             {
                 accessToken,
                 clientToken,
                 requestUser = true,
+                selectedProfile,
             };
 
             string body = await PostAsync("authserver/refresh", payload, ct).ConfigureAwait(false);
