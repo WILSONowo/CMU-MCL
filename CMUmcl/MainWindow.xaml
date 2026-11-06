@@ -669,12 +669,13 @@
                     <StackPanel Margin="28,18" MaxWidth="900" HorizontalAlignment="Stretch">
 
                         <ContentControl x:Name="GameDefaultsCard" HorizontalContentAlignment="Stretch" />
-                        <Border x:Name="AfterLaunchCard" Style="{StaticResource SettingsCard}">
+                        <!-- Autosaved launcher preference: kept apart from the game defaults form and its save row, aligned with its cards. -->
+                        <Border x:Name="AfterLaunchCard" Style="{StaticResource SettingsCard}" Margin="0,28,10,16">
                             <Grid>
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="230" /></Grid.ColumnDefinitions>
                                 <StackPanel VerticalAlignment="Center">
                                     <TextBlock Text="游戏启动后" Style="{StaticResource SectionHeader}" />
-                                    <TextBlock Text="游戏窗口出现后启动器的行为。" Style="{StaticResource FieldHint}" />
+                                    <TextBlock Text="游戏窗口出现后启动器的行为，修改后自动保存。" Style="{StaticResource FieldHint}" />
                                 </StackPanel>
                                 <ComboBox x:Name="AfterLaunchCombo" Grid.Column="1" VerticalAlignment="Center" SelectionChanged="AfterLaunch_Changed">
                                     <ComboBoxItem Content="保持启动器" /><ComboBoxItem Content="最小化，游戏退出后恢复" /><ComboBoxItem Content="关闭启动器" />

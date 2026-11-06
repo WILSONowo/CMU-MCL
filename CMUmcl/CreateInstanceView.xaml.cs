@@ -1097,7 +1097,7 @@ namespace CMUmcl
             }
             catch (Exception ex)
             {
-                MessageBox.Show(Window.GetWindow(this), "无法打开目录：" + ex.Message, "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                LauncherPrompt.Show(Window.GetWindow(this)!, "无法打开目录：" + ex.Message, "错误", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 

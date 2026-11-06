@@ -62,6 +62,8 @@ internal static partial class Program
         Screenshot(window,"runtime-dark.png");
         Get<ComboBox>(window,"ThemeCombo").SelectedIndex=(int)LauncherTheme.Light;
         Screenshot(window,"runtime-light.png");
+        var runtimeScroll=Get<ScrollViewer>(window,"SettingsContentScroll");runtimeScroll.ScrollToEnd();window.UpdateLayout();
+        Screenshot(window,"runtime-bottom-light.png");runtimeScroll.ScrollToTop();window.UpdateLayout();
         string java=CreateJavaFixture("chosen-java","21.0.5","x64");
         var candidates=Field<ComboBox>("_javaCandidates");
         candidates.ItemsSource=new[]{JavaLocator.DetectExecutable(java)!};candidates.SelectedIndex=0;
@@ -76,6 +78,21 @@ internal static partial class Program
         Check(store.Load().JavaPath==java && store.Load().Theme==LauncherTheme.Dark,"invalid Java does not block independent theme save");
         Descendants(editor).OfType<Button>().Single(x=>Equals(x.Content,"自动选择")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));SaveDefaults();
         Check(store.Load().JavaPath==null && !editor.HasUnsavedChanges,"automatic Java clears manual override on save");
+        foreach(var theme in new[]{LauncherTheme.Light,LauncherTheme.Dark})
+        {
+            Get<ComboBox>(window,"ThemeCombo").SelectedIndex=(int)theme;
+            Window? shown=null;
+            var pending=window.Dispatcher.InvokeAsync(()=>LauncherPrompt.Show(window,"启动失败，发生了未知错误。\nLaunch exception types: IOException (0x80131620).","启动失败",MessageBoxButton.OK,MessageBoxImage.Error));
+            await Until(()=>(shown=Application.Current.Windows.OfType<Window>().FirstOrDefault(w=>w.Owner==window&&w.Title=="启动失败"))?.IsLoaded==true);
+            shown!.UpdateLayout();
+            var card=Descendants(shown).OfType<Border>().First(b=>b.CornerRadius.TopLeft==6);
+            Check(((SolidColorBrush)card.Background).Color==((SolidColorBrush)Application.Current.FindResource("PopupBrush")).Color
+                && shown.WindowStyle==WindowStyle.None && !Descendants(shown).OfType<Button>().Any(b=>Equals(b.Content,"—")||Equals(b.Content,"×")),"prompt: themed popup card without system caption buttons in "+theme);
+            Check(Math.Abs(shown.Width-window.ActualWidth)<1 && Math.Abs(shown.Height-window.ActualHeight)<1,"prompt: backdrop covers the launcher in "+theme);
+            Screenshot(shown,"prompt-"+theme.ToString().ToLowerInvariant()+".png");
+            Descendants(shown).OfType<Button>().Single(b=>Equals(b.Content,"确定")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            Check(await pending.Task==MessageBoxResult.OK && !shown.IsVisible,"prompt: confirm closes and returns OK in "+theme);
+        }
         var afterLaunch=Get<ComboBox>(window,"AfterLaunchCombo");
         Check(Get<Border>(window,"AfterLaunchCard").IsVisible && afterLaunch.SelectedIndex==0,"after-launch option shown on game settings tab and defaults to keep");
         afterLaunch.SelectedIndex=(int)AfterLaunchAction.Minimize;

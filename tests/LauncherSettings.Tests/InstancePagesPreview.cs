@@ -27,7 +27,7 @@ internal static partial class Program
             using var writer = new StreamWriter(zip.CreateEntry("fabric.mod.json").Open());
             writer.Write("{\"id\":\"cmumcl-style-preview\",\"name\":\"界面预览示例\",\"description\":\"用于查看资源列表样式的本地示例文件。\"}");
         }
-        window._launchOverride = (_, _) => Task.FromException<LaunchResult>(new IOException("此示例仅用于界面预览。"));
+        window._launchOverride = (_, _) => Task.FromException<LaunchResult>(new LaunchException("这是界面预览，不会真正启动游戏。"));
         window.Title = "CMUmcl — NET48 实例管理预览";
         typeof(MainWindow).GetMethod("RefreshInstances", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(window, null);
         var card = new InstanceCardViewModel(id, metadata.Name, "本地预览", metadata, directory);

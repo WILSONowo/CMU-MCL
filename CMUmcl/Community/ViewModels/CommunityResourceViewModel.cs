@@ -370,7 +370,7 @@ namespace CMUmcl.Community
                         : null);
                 if (kind == ResourceKind.Mod)
                     detail.ConfigureDependencies((dependency, ct) => _catalog.ResolveDependencyAsync(card.Project.Source, dependency, ct), _icons.LoadAsync);
-                detail.ConfirmOverwrite = path => MessageBox.Show(
+                detail.ConfirmOverwrite = path => LauncherPrompt.ShowForApp(
                     "文件已存在：\n" + path + "\n\n是否覆盖？", "确认覆盖", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes;
                 detail.InstallProgress = new Progress<CommunityInstallProgress>(detail.ReportProgress);
                 Detail = detail;

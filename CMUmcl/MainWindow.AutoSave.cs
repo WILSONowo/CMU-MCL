@@ -91,7 +91,7 @@ public partial class MainWindow
             if (SavePreference(s => s.InstancesDirectory = directory)) InstancesDirectoryTextBox.Text = directory ?? "";
             return;
         }
-        if (MessageBox.Show(this, $"将 {records.Count} 个实例从\n{oldDirectory}\n移动到\n{destination}\n\n是否继续？", "更改游戏目录", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
+        if (LauncherPrompt.Show(this, $"将 {records.Count} 个实例从\n{oldDirectory}\n移动到\n{destination}\n\n是否继续？", "更改游戏目录", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
         try
         {
             _migrating = true; SettingsContentScroll.IsEnabled = false;
