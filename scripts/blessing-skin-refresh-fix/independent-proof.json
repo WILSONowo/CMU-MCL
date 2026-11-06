@@ -1,0 +1,23 @@
+{
+  "testedAt": "2026-11-06T19:19:36.1475115+08:00",
+  "transport": "Independent PowerShell HTTP client; no launcher auth parser",
+  "beforeStatus": 204,
+  "refreshStatus": 200,
+  "tokenChanged": true,
+  "clientTokenUnchanged": true,
+  "selectedProfileUnchanged": true,
+  "jwtSubjectUnchanged": false,
+  "jwtIssuerUnchanged": true,
+  "jwtBoundProfileUnchanged": true,
+  "oldIssuedAt": "2026-11-06T19:11:23+08:00",
+  "newIssuedAt": "2026-11-06T19:19:40+08:00",
+  "newExpiresAt": "2026-11-09T19:19:40+08:00",
+  "newValidateWithClientToken": 403,
+  "newValidateWithoutClientToken": 403,
+  "oldTokenValidate": 403,
+  "errorCode": "ForbiddenOperationException",
+  "invalidAccessTokenMessage": true,
+  "delayedNewTokenValidation": 403,
+  "delayedCheckedAt": "2026-11-06T19:22:57.0172886+08:00",
+  "userConfirmedUppercaseEmail": true
+}

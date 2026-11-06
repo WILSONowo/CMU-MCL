@@ -39,3 +39,15 @@
 - 本地回执与日志：`outputs/release-evidence/2026-11-06/auth-session/`。回执不包含令牌或密码。正式客户端包仅保留 0.3.48.15，旧 0.3.48.14 已移至 `.tmp/previous-releases/`。
 
 客户端再次正常退出、重启后自动恢复已保存的登录状态，无需再次输入凭据；原游戏进程继续运行。
+
+## 后续根因定位（同日）
+
+独立 PowerShell HTTP 客户端绕开启动器的网络封装、响应解析与会话门控后，复现旧令牌 validate 204 → refresh 200 → 新令牌 validate 403。对比服务器签发的 JWT：clientToken、角色、issuer 未变，sub 改变；去掉 clientToken、延迟数分钟复验仍为 403。账号持有人随后确认绑定邮箱含大写字母，且皮肤站为第三方站点。
+
+与 [Blessing Skin 上游问题 #212](https://github.com/bs-community/blessing-skin-plugins/issues/212) 及源码对照：authenticate 和 Token::isValid 以原始邮箱生成账号 UUID v5；refresh 单独先 strtolower，导致混合大小写邮箱生成不同的身份并在 RelatedTo 校验失败。独立请求也失败，排除了 CMUmcl 响应解析或 clientToken 兼容问题。未读取第三方站点部署源码，根因判断依据为真实协议差异、用户确认及同一上游缺陷的可重复复现。
+
+提供一行最小服务端补丁：刷新路径保留原邮箱大小写，与现有登录、校验身份一致。没有修改客户端令牌、跳过校验或改变全站账号 UUID。实际补丁应用检查、PHP 语法检查通过，使用上游真实 Token::isValid、Ramsey UUID 4.9.4 与 Lcobucci JWT 5.6.1，32 项回归通过；覆盖全小写、邮箱用户名大写、域名大写、全大写及连续刷新。依赖由 composer.lock 锁定。
+
+源文件与复现方法：`scripts/blessing-skin-refresh-fix/`。管理员交付包：`outputs/support-artifacts/blessing-skin-refresh-fix-2026-11-06.zip`（工作区根目录下）。包内无邮箱地址、令牌、密码、密钥；线上响应的敏感诊断仅以 Windows DPAPI 加密保留在 `.tmp/auth-refresh-root-cause/`。
+
+状态：服务端最小补丁完成且本地回归通过，尚未部署到第三方站点。等待管理员部署或账号持有人选择临时绕行办法后，才能重测真实的登录 → 刷新 → 校验 → 进服；本地 PHP 回归不能替代这项线上验收。

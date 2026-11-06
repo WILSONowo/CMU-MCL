@@ -1,0 +1,11 @@
+--- a/plugins/yggdrasil-api/src/Controllers/AuthController.php
++++ b/plugins/yggdrasil-api/src/Controllers/AuthController.php
+@@ -120,7 +120,7 @@
+         }
+ 
+         // 用户 ID 根据其邮箱生成
+-        $userUuid = Uuid::uuid5(Uuid::NAMESPACE_DNS, strtolower($user->email))->getHex()->toString();
++        $userUuid = Uuid::uuid5(Uuid::NAMESPACE_DNS, $user->email)->getHex()->toString();
+ 
+         $jwtConfig = JWT\Configuration::forSymmetricSigner(
+             new JWT\Signer\Hmac\Sha256(),

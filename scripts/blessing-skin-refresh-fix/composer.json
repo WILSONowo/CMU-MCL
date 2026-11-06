@@ -1,0 +1,1 @@
+{"require": {"ramsey/uuid": "^4.9", "lcobucci/jwt": "^5.6"}}
