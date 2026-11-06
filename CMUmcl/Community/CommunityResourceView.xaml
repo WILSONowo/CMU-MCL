@@ -79,7 +79,7 @@
       </Button>
      </DataTemplate></ListBox.ItemTemplate>
     </ListBox>
-    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="{Binding IsLoading, Converter={StaticResource BoolToVisibility}}"><ProgressBar Width="160" Height="4" IsIndeterminate="True"/><TextBlock Text="正在搜索…" Margin="0,14,0,0" HorizontalAlignment="Center"/></StackPanel>
+    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="{Binding ShowLoadingOverlay, Converter={StaticResource BoolToVisibility}}"><ProgressBar Width="160" Height="4" IsIndeterminate="True"/><TextBlock Text="正在搜索…" Margin="0,14,0,0" HorizontalAlignment="Center"/></StackPanel>
     <TextBlock Text="{Binding EmptyMessage}" Visibility="{Binding HasEmptyMessage, Converter={StaticResource BoolToVisibility}}" Foreground="{DynamicResource MutedTextBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" TextWrapping="Wrap"/>
     <StackPanel Visibility="{Binding HasError, Converter={StaticResource BoolToVisibility}}" HorizontalAlignment="Center" VerticalAlignment="Center"><TextBlock Text="{Binding ErrorMessage}" MaxWidth="520" TextWrapping="Wrap" Foreground="{DynamicResource ErrorBrush}"/><Button Content="重试" Command="{Binding SearchCommand}" Style="{DynamicResource SecondaryButton}" Margin="0,12,0,0"/></StackPanel>
    </Grid>

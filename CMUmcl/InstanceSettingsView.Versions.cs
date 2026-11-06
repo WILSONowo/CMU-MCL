@@ -63,6 +63,7 @@ internal sealed partial class InstanceSettingsView
     {
         _ = FillGameVersionsAsync(quiet: true);
         if (!IsVanilla) _ = FillLoaderVersionsAsync(false, quiet: true);
+        _ = RefreshComponentStateAsync();
     }
 
     private async Task FillGameVersionsAsync(bool quiet = false)

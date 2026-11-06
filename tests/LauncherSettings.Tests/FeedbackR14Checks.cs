@@ -92,6 +92,28 @@ internal static partial class Program
             var back=Descendants(editor).OfType<Button>().Single(x=>Equals(x.Content,"← 返回"));var bounds=back.TransformToAncestor(root).TransformBounds(new Rect(back.RenderSize));Check(bounds.Right<=root.ActualWidth+1 && bounds.Bottom<=root.ActualHeight+1 && back.ActualHeight>0,"embedded: back action remains in main content at scale "+scale);
         }
         host.LayoutTransform=Transform.Identity;window.UpdateLayout();Screenshot(window,"embedded-settings.png");Click(window,"InstancesNavButton");
+        // Deleting an instance from its management page.
+        string doomed=Path.Combine(LauncherPaths.InstancesDirectory,"embedded-delete");Directory.CreateDirectory(Path.Combine(doomed,"saves"));
+        File.WriteAllText(Path.Combine(doomed,"instance.json"),JsonSerializer.Serialize(new InstanceMetadata{Id="local:embedded-delete",Name="待删除实例",Game="1.21.1",Loader="fabric",LoaderVersion="0.16.10"}));
+        installed.RecordInstall("local:embedded-delete",1,"embedded-delete","待删除实例");
+        string recycled=Path.Combine(_output,"recycled-instance");InstanceRemoval.RecycleOverride=path=>Directory.Move(path,recycled);
+        try
+        {
+            Click(window,"InstancesNavButton");Call(window,"RefreshInstances");window.UpdateLayout();
+            var doomedCard=Get<ItemsControl>(window,"InstancesList").Items.OfType<InstanceCardViewModel>().Single(x=>x.InstanceId=="local:embedded-delete");
+            Call(window,"InstanceSettings_Click",new Button{DataContext=doomedCard},new RoutedEventArgs());window.UpdateLayout();
+            var doomedEditor=(InstanceSettingsView)host.Content;
+            Descendants(doomedEditor).OfType<ListBox>().First().SelectedIndex=6;window.UpdateLayout();
+            var deleteButton=Descendants(doomedEditor).OfType<Button>().Single(x=>Equals(x.Content,"删除实例"));
+            Check(deleteButton.IsVisible,"delete: instance management offers deletion");
+            deleteButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));await Until(()=>Get<Grid>(window,"InlinePromptOverlay").IsVisible);
+            Check(Get<TextBlock>(window,"InlinePromptMessage").Text.Contains("回收站"),"delete: confirmation says the folder goes to the recycle bin");
+            Click(window,"InlinePromptContinue");await Until(()=>doomedEditor.IsClosed);await Task.Delay(50);window.UpdateLayout();
+            Check(!installed.ListRecords().ContainsKey("local:embedded-delete") && !Directory.Exists(doomed) && Directory.Exists(recycled)
+                && !Get<ItemsControl>(window,"InstancesList").Items.OfType<InstanceCardViewModel>().Any(x=>x.InstanceId=="local:embedded-delete") && Get<ScrollViewer>(window,"InstancesScroll").IsVisible,
+                "delete: instance leaves the list and its folder is recycled");
+        }
+        finally { InstanceRemoval.RecycleOverride=null; }
         File.WriteAllText(Path.Combine(_output,"result.txt"),$"PASS {_checks} embedded interaction checks");
     }
 }

@@ -45,6 +45,7 @@ namespace CMUmcl
         private bool _updatingLauncher;
         private bool _windowClosed;
         private int _activeOperations;
+        private readonly bool _prefetchCommunity;
 
         private enum MainPage { Packs, Community, Instances, Settings, InstanceSettings, InstanceContent }
         private enum PacksContentState { Loading, Cards, Empty, Error }
@@ -90,6 +91,7 @@ namespace CMUmcl
             _localInstanceService = localInstanceService;
 
             _community = communityOverride ?? Community.CommunityResourceViewModel.CreateDefault(_installedState);
+            _prefetchCommunity = communityOverride == null;
             CommunityResourceView.DataContext = _community;
 
             AccountNameText.Text = session.SelectedProfileName;
@@ -133,6 +135,12 @@ namespace CMUmcl
             _ = LoadAccountAvatarAsync();
             _ = CheckLauncherUpdateAsync(false);
             await LoadManifestAsync();
+            // Fetch the first community page in the background so opening that page is instant.
+            if (_prefetchCommunity)
+            {
+                await Task.Delay(1500);
+                if (!_windowClosed) _ = _community.EnsureLoadedAsync();
+            }
         }
 
         private async void CheckLauncherUpdate_Click(object sender, RoutedEventArgs e) => await CheckLauncherUpdateAsync(true);

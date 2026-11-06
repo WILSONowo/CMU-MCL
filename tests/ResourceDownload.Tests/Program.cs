@@ -57,6 +57,7 @@ Check(CMUmcl.Community.CommunityHosts.ResourceCdn.Contains("csumcl.mcapcs.cn") &
 await ResumeTests.Run(Check);
 await FullInstallCleanupTests.Run(Check);
 await LauncherFeatureTests.Run(Check);
+await FeedbackFixTests.Run(Check);
 await UpdateFeedTests.Run(Check);
 await UpdateStageTests.Run(Check);
 if(args.Length!=0) throw new ArgumentException("No backend operations in this isolated suite");

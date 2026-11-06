@@ -71,6 +71,14 @@ internal sealed partial class InstanceSettingsView
         AddField(general, "显示名称（留空恢复原名）", _name);
         _icon.ItemsSource = new[] { "自动图标（按加载器）" }.Concat(InstanceOptionsStore.Icons);
         AddField(general, "实例图标", _icon); AddText(general, _directory);
+        if (!_global)
+        {
+            var removal = InstancePageUi.Section(_pages[0], "删除实例");
+            AddText(removal, "实例文件夹会移到回收站，可以从回收站恢复。共享游戏目录中的内容不受影响。");
+            var delete = Button("删除实例", () => DeleteRequested?.Invoke());
+            delete.SetResourceReference(ForegroundProperty, "DangerBrush");
+            removal.Children.Add(delete);
+        }
 
         var java = SettingSection(_pages[1], "Java", _javaOverride);
         var picker = new Grid { Margin = new Thickness(0, 0, 0, 10) };

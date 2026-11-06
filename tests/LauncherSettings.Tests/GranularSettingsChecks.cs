@@ -63,9 +63,18 @@ internal static partial class Program
         VersionChoices.Override=(loader,game)=>Task.FromResult(game=="1.21.1"?new[]{"0.16.10","0.16.9"}:new[]{"0.15.0"});
         try
         {
-            var picker=new InstanceSettingsView(directory,"Version fixture",store){Width=850,Height=650};picker.Show();await Task.Delay(30);
+            string pickerDir=Path.Combine(_output,"picker-local");Directory.CreateDirectory(Path.Combine(pickerDir,"mods"));
+            File.WriteAllText(Path.Combine(pickerDir,"instance.json"),"{\"id\":\"local:picker\",\"name\":\"Picker\",\"game\":\"1.21.1\",\"loader\":\"fabric\",\"loaderVersion\":\"0.16.9\"}");
+            using(var zip=System.IO.Compression.ZipFile.Open(Path.Combine(pickerDir,"mods","fabric-api-0.92.0.jar"),System.IO.Compression.ZipArchiveMode.Create))
+            using(var writer=new StreamWriter(zip.CreateEntry("fabric.mod.json").Open()))writer.Write("{\"id\":\"fabric-api\",\"version\":\"0.92.0\"}");
+            var picker=new InstanceSettingsView(pickerDir,"Version fixture",store){Width=850,Height=650};picker.Show();await Task.Delay(30);
             Descendants(picker).OfType<ListBox>().First().SelectedIndex=1;await Task.Delay(80);picker.UpdateLayout();
             T PickerField<T>(string name)=>(T)picker.GetType().GetField(name,BindingFlags.NonPublic|BindingFlags.Instance)!.GetValue(picker)!;
+            await Until(()=>Descendants(picker).OfType<Button>().Any(x=>Equals(x.Content,"升级到 0.16.10")&&x.IsVisible));
+            Check(Descendants(picker).OfType<TextBlock>().Any(t=>t.Text=="Minecraft 1.21.1 · Fabric 0.16.9"),"components: current version summary is shown");
+            await Until(()=>PickerField<TextBlock>("_fabricApiState").Text=="已安装 0.92.0");
+            Check(Descendants(picker).OfType<Button>().Any(x=>Equals(x.Content,"更新到最新版本")&&x.IsVisible),"components: installed Fabric API is detected and offers an update");
+            Check(!Descendants(picker).OfType<Button>().Any(x=>Equals(x.Content,"取消")&&x.IsVisible),"components: cancel only appears while something runs");
             var game=PickerField<ComboBox>("_gameVersion");var kind=PickerField<ComboBox>("_loaderKind");var loaderVersion=PickerField<ComboBox>("_loaderVersion");
             Check(game.Items.Count==4 && game.Items.OfType<VersionChoice>().Any(v=>v.Tag=="愚人节") && game.Items.OfType<VersionChoice>().Any(v=>v.Tag=="远古版本") && game.Text=="1.21.1" && !Descendants(picker).OfType<Button>().Any(x=>x.Content is string s&&s.StartsWith("获取")),"versions: list loads with the tab and includes every version type");
             game.IsDropDownOpen=true;await Task.Delay(80);picker.UpdateLayout();
@@ -83,6 +92,12 @@ internal static partial class Program
             Check(game.Text=="1.20.4","versions: choosing an entry puts the plain version id in the field");
             Check(true,"versions: changing game version re-picks a compatible loader build");
             picker.Close();
+            var server=new InstanceSettingsView(directory,"Server fixture",store){Width=850,Height=650};server.Show();await Task.Delay(30);
+            Descendants(server).OfType<ListBox>().First().SelectedIndex=1;await Task.Delay(40);server.UpdateLayout();
+            var serverGame=(ComboBox)server.GetType().GetField("_gameVersion",BindingFlags.NonPublic|BindingFlags.Instance)!.GetValue(server)!;
+            Check(!serverGame.IsVisible && Descendants(server).OfType<TextBlock>().Any(t=>t.Text.StartsWith("这是服务器整合包")) && Descendants(server).OfType<Button>().Any(x=>Equals(x.Content,"检查并修复游戏文件")&&x.IsVisible),
+                "components: server packs explain version ownership instead of a failing form, repair stays available");
+            server.Close();
         }
         finally { VersionChoices.Override=null;VersionChoices.GameOverride=null; }
         Click(owner,"SettingsNavButton");Click(owner,"RuntimeTab");owner.UpdateLayout();

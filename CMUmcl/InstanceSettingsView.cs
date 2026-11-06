@@ -59,6 +59,7 @@ namespace CMUmcl
         internal event Action? SettingsApplied;
         internal event Action? BackRequested;
         internal event Action? EditGlobalDefaultsRequested;
+        internal event Action? DeleteRequested;
         internal Func<string,string,Task<bool>>? ConfirmAsync {get;set;}
         private string _savedSnapshot="";
         internal bool HasUnsavedChanges=>!IsClosed && CaptureSettings()!=_savedSnapshot;

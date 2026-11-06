@@ -19,7 +19,7 @@
   <ItemGroup><ProjectReference Include="../CMUmcl.Updater/CMUmcl.Updater.csproj" ReferenceOutputAssembly="false" /></ItemGroup>
   <ItemGroup>
 
-    <Reference Include="System.Net.Http" /><Reference Include="System.IO.Compression" /><Reference Include="System.IO.Compression.FileSystem" />
+    <Reference Include="System.Net.Http" /><Reference Include="Microsoft.VisualBasic" /><Reference Include="System.IO.Compression" /><Reference Include="System.IO.Compression.FileSystem" />
     <PackageReference Include="CmlLib.Core" Version="4.1.0" />
     <PackageReference Include="Imazen.WebP" Version="11.0.0" />
     <PackageReference Include="Imazen.WebP.NativeRuntime.win-x64" Version="1.6.1" />

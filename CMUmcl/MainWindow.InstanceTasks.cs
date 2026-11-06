@@ -58,6 +58,7 @@ public partial class MainWindow
         _settingsWindows.Add(card.InstanceId,editor);
         editor.OperationFinished+=(_,_)=>{if(editor.IsClosed)_settingsWindows.Remove(card.InstanceId);};
         editor.Closed+=(_,_)=>{if(!editor.MaintenanceBusy)_settingsWindows.Remove(card.InstanceId);EmbeddedEditorClosed(editor);};
+        editor.DeleteRequested+=async()=>await DeleteInstanceAsync(card,editor);
         editor.EditGlobalDefaultsRequested+=()=>
         {
             CancelInlinePrompt();_parentEditor=editor;
@@ -65,6 +66,26 @@ public partial class MainWindow
             global.Closed+=(_,_)=>EmbeddedEditorClosed(global);ShowInstanceEditor(global);
         };
         ShowInstanceEditor(editor);
+    }
+
+    private async Task DeleteInstanceAsync(InstanceCardViewModel card, InstanceSettingsView editor)
+    {
+        if(IsInstanceBusy(card) || editor.MaintenanceBusy || !CanInstallPack(card.InstanceId))
+        { await ShowInlinePromptAsync("无法删除","实例正在启动、运行、安装或维护，请结束后再删除。","知道了");return; }
+        bool server=!card.InstanceId.StartsWith(PackAutoUpdate.LocalIdPrefix,StringComparison.Ordinal);
+        string shared="";
+        try{var metadata=InstanceMaintenance.Read(card.InstallPath);if(!string.Equals(GameDirectoryResolver.ResolveGameDirectory(_settingsStore.Load(),card.InstallPath,metadata.Loader),card.InstallPath,StringComparison.OrdinalIgnoreCase))shared="此实例使用共享游戏目录，其中的存档和设置会保留。";}catch{ }
+        string message=$"将把“{card.DisplayName}”的实例文件夹移到回收站，并从实例列表中移除。{shared}{(server?"之后可在“整合包”页重新安装。":"")}";
+        if(await ShowInlinePromptAsync("删除实例",message,"删除")!=InlineChoice.Continue || editor.IsClosed)return;
+        if(IsInstanceBusy(card) || !CanInstallPack(card.InstanceId)){await ShowInlinePromptAsync("无法删除","实例刚刚开始运行或安装，请结束后再删除。","知道了");return;}
+        editor.DiscardPendingChanges();
+        try{_activeOperations++;await Task.Run(()=>InstanceRemoval.Remove(_installedState,card.InstanceId,card.InstallPath));}
+        catch(Exception ex){LauncherPrompt.Show(this,"删除失败："+ex.Message,"删除实例",MessageBoxButton.OK,MessageBoxImage.Warning);return;}
+        finally{_activeOperations--;}
+        _crashes.Remove(card.InstanceId);
+        editor.Close();
+        foreach(var pack in _cards)if(string.Equals(pack.InstanceId,card.InstanceId,StringComparison.Ordinal))pack.UpdateButtonState(null);
+        if(!_windowClosed){RefreshInstances();ShowInstancesView();}
     }
 
     private void ShowInstanceEditor(InstanceSettingsView editor)
