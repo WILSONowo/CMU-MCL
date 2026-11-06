@@ -54,7 +54,9 @@ namespace CMUmcl.Auth
     /// <summary>Raised when the Yggdrasil server returns an error or an unexpected status.</summary>
     public sealed class YggdrasilException : Exception
     {
+        public bool RequiresLogin { get; }
         public YggdrasilException(string message) : base(message) { }
+        public YggdrasilException(string message, bool requiresLogin) : base(message) { RequiresLogin = requiresLogin; }
         public YggdrasilException(string message, Exception inner) : base(message, inner) { }
     }
 
@@ -77,10 +79,10 @@ namespace CMUmcl.Auth
 
         private readonly HttpClient _http;
 
-        public YggdrasilClient()
-        {
-            var handler = CMUmcl.Network.LauncherProxy.CreateHandler();
+        public YggdrasilClient() : this(CMUmcl.Network.LauncherProxy.CreateHandler()) { }
 
+        internal YggdrasilClient(HttpMessageHandler handler)
+        {
             _http = new HttpClient(handler)
             {
                 Timeout = TimeSpan.FromSeconds(20),
@@ -178,7 +180,7 @@ namespace CMUmcl.Auth
             {
                 throw new YggdrasilException("网络错误，无法连接皮肤站，请检查网络连接。");
             }
-            catch (TaskCanceledException)
+            catch (TaskCanceledException) when (!ct.IsCancellationRequested)
             {
                 throw new YggdrasilException("连接皮肤站超时，请稍后再试。");
             }
@@ -187,13 +189,15 @@ namespace CMUmcl.Auth
         /// <summary>
         /// Refreshes an access token. Returns the new token and selected profile.
         /// </summary>
-        public async Task<RefreshResult> RefreshAsync(string accessToken, string clientToken, CancellationToken ct = default)
+        public async Task<RefreshResult> RefreshAsync(string accessToken, string clientToken, CancellationToken ct = default,
+            YggdrasilProfile? selectedProfile = null)
         {
             var payload = new
             {
                 accessToken,
                 clientToken,
                 requestUser = true,
+                selectedProfile,
             };
 
             string body = await PostAsync("authserver/refresh", payload, ct).ConfigureAwait(false);
@@ -275,10 +279,11 @@ namespace CMUmcl.Auth
                 try
                 {
                     using var doc = JsonDocument.Parse(body);
-                    if (doc.RootElement.TryGetProperty("error", out var e))
-                        error = e.GetString();
-                    if (doc.RootElement.TryGetProperty("errorMessage", out var m))
-                        errorMessage = m.GetString();
+                    if (doc.RootElement.ValueKind == JsonValueKind.Object)
+                    {
+                        error = GetString(doc.RootElement, "error");
+                        errorMessage = GetString(doc.RootElement, "errorMessage");
+                    }
                 }
                 catch (JsonException)
                 {
@@ -287,7 +292,7 @@ namespace CMUmcl.Auth
             }
 
             string friendly = MapError(error, errorMessage, status);
-            return new YggdrasilException(friendly);
+            return new YggdrasilException(friendly, status == HttpStatusCode.Forbidden || status == HttpStatusCode.Unauthorized);
         }
 
         private static string MapError(string? error, string? errorMessage, HttpStatusCode status)

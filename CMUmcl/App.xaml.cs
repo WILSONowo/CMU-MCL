@@ -97,43 +97,11 @@ namespace CMUmcl
 
             try
             {
-                bool valid = _client!.ValidateAsync(saved.AccessToken, saved.ClientToken)
-                    .GetAwaiter().GetResult();
-                if (valid)
-                {
-                    saved.SavedAt = DateTimeOffset.UtcNow;
-                    return saved;
-                }
+                return _launchService!.EnsureValidSessionAsync(saved).GetAwaiter().GetResult();
             }
             catch (YggdrasilException)
             {
-                // Fall through to refresh attempt.
-            }
-
-            // Token invalid (403) or unavailable — try refreshing.
-            try
-            {
-                RefreshResult refreshed = _client!.RefreshAsync(saved.AccessToken, saved.ClientToken)
-                    .GetAwaiter().GetResult();
-
-                var updated = new AuthSession
-                {
-                    ClientToken = string.IsNullOrWhiteSpace(refreshed.ClientToken)
-                        ? saved.ClientToken
-                        : refreshed.ClientToken,
-                    AccessToken = refreshed.AccessToken,
-                    SelectedProfileId = refreshed.SelectedProfile?.Id ?? saved.SelectedProfileId,
-                    SelectedProfileName = refreshed.SelectedProfile?.Name ?? saved.SelectedProfileName,
-                    Username = refreshed.User?.Username ?? saved.Username,
-                    SavedAt = DateTimeOffset.UtcNow,
-                };
-
-                _store.SaveSession(updated);
-                return updated;
-            }
-            catch (YggdrasilException)
-            {
-                // Refresh failed — the saved session is unusable.
+                // Do not admit an unverified refresh response into the main window.
             }
 
             _store.ClearSession();
@@ -141,9 +109,10 @@ namespace CMUmcl
         }
 
         /// <summary>Shows the login window and returns the resulting session, or null if cancelled.</summary>
-        private AuthSession? ShowLogin()
+        private AuthSession? ShowLogin(Window? owner = null)
         {
             var login = new LoginWindow(_client!, _store!) { Title = "CMUmcl \u2014 NET48 " + CMUmcl.Update.LauncherUpdateClient.CurrentVersion.ToString() + " \u767B\u5F55" };
+            if (owner != null) login.Owner = owner;
             bool? ok = login.ShowDialog();
             if (ok == true && login.ResultSession != null)
             {
@@ -156,6 +125,7 @@ namespace CMUmcl
         private void ShowMainWindow(AuthSession session)
         {
             var main = new MainWindow(session, _store!, _manifestClient!, _installer!, _installedState!, _launchService!, _settingsStore!, _localInstanceService!);
+            main.ReauthenticateForLaunch = () => System.Threading.Tasks.Task.FromResult(ShowLogin(main));
             bool loggingOut = false;
 
             main.Title = "CMUmcl \u2014 NET48 " + CMUmcl.Update.LauncherUpdateClient.CurrentVersion.ToString();

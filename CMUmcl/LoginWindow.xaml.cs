@@ -139,15 +139,7 @@ namespace CMUmcl
                     return;
                 }
 
-                var session = new AuthSession
-                {
-                    ClientToken = string.IsNullOrWhiteSpace(result.ClientToken) ? clientToken : result.ClientToken,
-                    AccessToken = result.AccessToken,
-                    SelectedProfileId = profile.Id,
-                    SelectedProfileName = profile.Name,
-                    Username = result.User?.Username ?? username,
-                    SavedAt = DateTimeOffset.UtcNow,
-                };
+                var session = await AuthSessionGate.CompleteLoginAsync(_client, result, profile, clientToken, username);
 
                 if (RememberLogin)
                 {

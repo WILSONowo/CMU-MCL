@@ -1,3 +1,4 @@
 *.sh text eol=lf
 *.yml text eol=lf
 *.md text eol=lf
+scripts/blessing-skin-refresh-fix/*.patch text eol=lf
