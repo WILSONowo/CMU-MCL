@@ -130,6 +130,13 @@ internal static partial class Program
         Check(Descendants(Get<ItemsControl>(window,"CardsList")).OfType<TextBlock>().Any(x=>x.Text=="\u5FC5\u9700"),"required chip is rendered in the pack card");
         if(Environment.GetCommandLineArgs().Contains("--auth-recovery")){await AuthRecoveryChecks(window);window.Close();return;}
         await LauncherUpdatePopupChecks(window);
+        if(preview && Environment.GetCommandLineArgs().Contains("--skin-offline"))
+        {
+            // Preview only: the skin site is unreachable at startup and when launching.
+            var down=new YggdrasilException("网络错误，无法连接皮肤站，请检查网络连接。");
+            _ = window.VerifyRestoredSessionAsync(_=>Task.FromException<AuthSession>(down));
+            window._launchOverride=(_,_)=>Task.FromException<LaunchResult>(new LaunchException("无法确认登录状态："+down.Message,down));
+        }
         if(preview && Environment.GetCommandLineArgs().Contains("--instance-pages"))
         { ShowInstancePagesPreview(window,installed,store);return; }
         if(Environment.GetCommandLineArgs().Contains("--local-mod-icons")){await LocalModIconChecks(Path.GetFullPath(Environment.GetCommandLineArgs()[1]));window.Close();return;}

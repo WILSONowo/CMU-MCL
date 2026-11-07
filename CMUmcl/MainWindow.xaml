@@ -308,6 +308,10 @@
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
 
                         <Border Grid.Column="0" Width="38" Height="38" CornerRadius="0"
                                 SnapsToDevicePixels="True" UseLayoutRounding="True"
@@ -324,7 +328,7 @@
                         </Border>
 
                         <StackPanel Grid.Column="1" Margin="12,0,8,0" VerticalAlignment="Center">
-                            <TextBlock Text="已登录" FontSize="11" Foreground="{DynamicResource MutedTextBrush}" />
+                            <TextBlock x:Name="AccountStateText" Text="已登录" FontSize="11" Foreground="{DynamicResource MutedTextBrush}" TextTrimming="CharacterEllipsis" />
                             <TextBlock x:Name="AccountNameText" Text="" FontSize="13" FontWeight="SemiBold"
                                        Foreground="{DynamicResource TextBrush}" Margin="0,2,0,0"
                                        TextTrimming="CharacterEllipsis" />
@@ -332,6 +336,18 @@
 
                         <Button x:Name="LogoutButton" Grid.Column="2" Content="退出" VerticalAlignment="Center"
                                 Style="{StaticResource GhostButton}" Click="LogoutButton_Click" />
+
+                        <!-- Skin-site notices: full width so the text wraps instead of being cut off. -->
+                        <Border x:Name="AccountNotice" Grid.Row="1" Grid.ColumnSpan="3" Margin="0,12,0,0" Padding="10,7"
+                                CornerRadius="6" Background="{DynamicResource AccentSoftBrush}" Visibility="Collapsed"
+                                ToolTipService.InitialShowDelay="200" ToolTipService.ShowDuration="30000" Cursor="Help">
+                            <DockPanel>
+                                <TextBlock DockPanel.Dock="Left" Text="&#xE7BA;" FontFamily="Segoe MDL2 Assets" FontSize="13" Margin="0,1,8,0"
+                                           VerticalAlignment="Top" Foreground="{DynamicResource AccentBrush}" />
+                                <TextBlock x:Name="AccountNoticeText" FontSize="12" TextWrapping="Wrap" LineHeight="18"
+                                           Foreground="{DynamicResource AccentBrush}" />
+                            </DockPanel>
+                        </Border>
                     </Grid>
                 </Border>
             </Grid>

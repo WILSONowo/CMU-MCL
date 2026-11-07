@@ -36,6 +36,7 @@
     <Resource Include="Assets\InstanceIcons\*.jpg" />
     <Resource Include="Assets\CMUmcl.ico" />
     <Resource Include="Assets\CMUmcl-icon.png" />
+    <Resource Include="Assets\Easter\skin-site-unbreakable.jpg" />
   </ItemGroup>
 
   <ItemGroup Condition="'$(CMUMCL_CF_PRIVATE_BUILD_ROOT)' != '' and '$(CMUMCL_CF_BUILD_RESOURCE)' != ''">

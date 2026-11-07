@@ -728,7 +728,11 @@ namespace CMUmcl
             catch (LaunchException ex)
             {
                 vm.LaunchFail(ex.Message);
-                LauncherPrompt.Show(this, ex.Message, "启动失败", MessageBoxButton.OK, MessageBoxImage.Warning);
+                // Skin site unreachable (not an expired login): say so the way the group does.
+                bool skinSiteDown = ex.InnerException is YggdrasilException auth && !auth.RequiresLogin;
+                if (skinSiteDown) ShowSkinSiteUnreachable(ex.Message);
+                LauncherPrompt.Show(this, ex.Message, skinSiteDown ? SkinSiteUnreachableText : "启动失败", MessageBoxButton.OK, MessageBoxImage.Warning,
+                    skinSiteDown ? SkinSitePicture : null);
             }
             catch (OperationCanceledException)
             {

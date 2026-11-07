@@ -14,7 +14,7 @@ namespace CMUmcl;
 internal static class LauncherPrompt
 {
     internal static Func<Window,string,string,MessageBoxButton,MessageBoxResult>? ShowOverride;
-    internal static MessageBoxResult Show(Window owner,string message,string title="提示",MessageBoxButton buttons=MessageBoxButton.OK,MessageBoxImage image=MessageBoxImage.None)
+    internal static MessageBoxResult Show(Window owner,string message,string title="提示",MessageBoxButton buttons=MessageBoxButton.OK,MessageBoxImage image=MessageBoxImage.None,ImageSource? picture=null)
     {
         if(ShowOverride!=null)return ShowOverride(owner,message,title,buttons);
         MessageBoxResult result=buttons switch{MessageBoxButton.YesNo=>MessageBoxResult.No,MessageBoxButton.OK=>MessageBoxResult.OK,_=>MessageBoxResult.Cancel};
@@ -43,6 +43,7 @@ internal static class LauncherPrompt
         var body=new TextBlock{Text=message,Margin=new Thickness(0,16,0,24),TextWrapping=TextWrapping.Wrap,LineHeight=21};
         body.SetResourceReference(TextBlock.ForegroundProperty,"TextBrush");
         content.Children.Add(body);
+        if(picture!=null){body.Margin=new Thickness(0,16,0,12);content.Children.Add(new Image{Source=picture,Stretch=Stretch.Uniform,Margin=new Thickness(0,0,0,24),HorizontalAlignment=HorizontalAlignment.Left,MaxHeight=140});}
         var actions=new WrapPanel{HorizontalAlignment=HorizontalAlignment.Right};content.Children.Add(actions);
 
         Button? first=null;
