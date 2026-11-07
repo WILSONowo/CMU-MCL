@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using CMUmcl.Auth;
 using CMUmcl.Content;
 using CMUmcl.Launch;
+using CMUmcl.Network;
 
 namespace CMUmcl
 {
@@ -81,26 +82,50 @@ namespace CMUmcl
             catch (Exception ex) when (ex is YggdrasilException || ex is System.Net.Http.HttpRequestException || ex is TaskCanceledException)
             {
                 if (_windowClosed || !ReferenceEquals(_session, original)) return;
-                ShowSkinSiteUnreachable(ex.Message);
+                // Only blame the skin site once the rest of the internet is known to work.
+                var problem = await ConnectionDiagnosis.DiagnoseAsync(ex);
+                if (_windowClosed || !ReferenceEquals(_session, original)) return;
+                ShowConnectionProblem(problem, ex.Message);
             }
         }
 
         internal const string SkinSiteUnreachableText = "皮肤站现在已经坚不可摧";
+        internal const string LocalNetworkText = "网络连接不可用";
+        internal const string SkinSiteUncertainText = "暂时无法连接皮肤站";
 
-        /// <summary>The group's own caption for "the skin site is down", with the screenshot on hover.</summary>
-        private void ShowSkinSiteUnreachable(string reason)
+        internal static string ConnectionProblemTitle(ConnectionProblem problem) => problem switch
+        {
+            ConnectionProblem.SkinSiteDown => SkinSiteUnreachableText,
+            ConnectionProblem.LocalNetwork => LocalNetworkText,
+            _ => SkinSiteUncertainText,
+        };
+
+        internal static string ConnectionProblemExplanation(ConnectionProblem problem) => problem switch
+        {
+            ConnectionProblem.SkinSiteDown => "无法连接皮肤站，请检查皮肤站状态。",
+            ConnectionProblem.LocalNetwork => "目前无法访问互联网，请检查网络连接或代理设置。",
+            _ => "皮肤站响应异常，请稍后重试。",
+        };
+
+        /// <summary>
+        /// Notice under the account. The group's screenshot appears only when the skin site is
+        /// confirmed down; the user's own network problems get a plain explanation.
+        /// </summary>
+        private void ShowConnectionProblem(ConnectionProblem problem, string reason)
         {
             if (_windowClosed) return;
             // Still signed in: the saved session is kept and checked again before launching.
             SetAccountState("已登录");
             var card = new System.Windows.Controls.StackPanel { Width = 300 };
-            if (SkinSitePicture is { } picture)
+            if (problem == ConnectionProblem.SkinSiteDown && SkinSitePicture is { } picture)
                 card.Children.Add(new System.Windows.Controls.Image { Source = picture, Stretch = System.Windows.Media.Stretch.Uniform, Margin = new System.Windows.Thickness(0, 2, 0, 10) });
-            card.Children.Add(new System.Windows.Controls.TextBlock { Text = reason, FontWeight = System.Windows.FontWeights.SemiBold, TextWrapping = System.Windows.TextWrapping.Wrap });
-            var hint = new System.Windows.Controls.TextBlock { Text = "登录仍然保留，启动游戏前会再次确认。", Margin = new System.Windows.Thickness(0, 4, 0, 0), TextWrapping = System.Windows.TextWrapping.Wrap };
+            card.Children.Add(new System.Windows.Controls.TextBlock { Text = ConnectionProblemExplanation(problem), FontWeight = System.Windows.FontWeights.SemiBold, TextWrapping = System.Windows.TextWrapping.Wrap });
+            // A confirmed outage needs no technical detail; the other cases keep the raw reason.
+            string detail = problem == ConnectionProblem.SkinSiteDown ? "" : reason + "\n";
+            var hint = new System.Windows.Controls.TextBlock { Text = detail + "登录仍然保留，启动游戏前会再次确认。", Margin = new System.Windows.Thickness(0, 4, 0, 0), TextWrapping = System.Windows.TextWrapping.Wrap };
             hint.SetResourceReference(System.Windows.Controls.TextBlock.ForegroundProperty, "MutedTextBrush");
             card.Children.Add(hint);
-            AccountNoticeText.Text = SkinSiteUnreachableText;
+            AccountNoticeText.Text = ConnectionProblemTitle(problem);
             AccountNotice.ToolTip = card;
             AccountNotice.Visibility = System.Windows.Visibility.Visible;
         }

@@ -728,11 +728,20 @@ namespace CMUmcl
             catch (LaunchException ex)
             {
                 vm.LaunchFail(ex.Message);
-                // Skin site unreachable (not an expired login): say so the way the group does.
-                bool skinSiteDown = ex.InnerException is YggdrasilException auth && !auth.RequiresLogin;
-                if (skinSiteDown) ShowSkinSiteUnreachable(ex.Message);
-                LauncherPrompt.Show(this, ex.Message, skinSiteDown ? SkinSiteUnreachableText : "启动失败", MessageBoxButton.OK, MessageBoxImage.Warning,
-                    skinSiteDown ? SkinSitePicture : null);
+                // A connection failure to the skin site: work out whose side it is on before saying so.
+                CMUmcl.Network.ConnectionProblem? problem = null;
+                if (ex.InnerException is YggdrasilException auth && !auth.RequiresLogin && auth.Failure != YggdrasilFailure.Other)
+                    problem = await CMUmcl.Network.ConnectionDiagnosis.DiagnoseAsync(auth);
+                if (_windowClosed) return;
+                if (problem is { } found)
+                {
+                    ShowConnectionProblem(found, ex.Message);
+                    // A confirmed outage is stated plainly; the raw message would wrongly suggest checking the user's network.
+                    string message = found == CMUmcl.Network.ConnectionProblem.SkinSiteDown ? ConnectionProblemExplanation(found) : ex.Message + "\n" + ConnectionProblemExplanation(found);
+                    LauncherPrompt.Show(this, message, ConnectionProblemTitle(found), MessageBoxButton.OK, MessageBoxImage.Warning,
+                        found == CMUmcl.Network.ConnectionProblem.SkinSiteDown ? SkinSitePicture : null);
+                }
+                else LauncherPrompt.Show(this, ex.Message, "启动失败", MessageBoxButton.OK, MessageBoxImage.Warning);
             }
             catch (OperationCanceledException)
             {

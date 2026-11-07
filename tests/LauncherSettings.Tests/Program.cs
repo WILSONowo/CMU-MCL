@@ -130,10 +130,14 @@ internal static partial class Program
         Check(Descendants(Get<ItemsControl>(window,"CardsList")).OfType<TextBlock>().Any(x=>x.Text=="\u5FC5\u9700"),"required chip is rendered in the pack card");
         if(Environment.GetCommandLineArgs().Contains("--auth-recovery")){await AuthRecoveryChecks(window);window.Close();return;}
         await LauncherUpdatePopupChecks(window);
-        if(preview && Environment.GetCommandLineArgs().Contains("--skin-offline"))
+        bool netOffline=Environment.GetCommandLineArgs().Contains("--net-offline");
+        if(preview && (netOffline || Environment.GetCommandLineArgs().Contains("--skin-offline")))
         {
-            // Preview only: the skin site is unreachable at startup and when launching.
-            var down=new YggdrasilException("网络错误，无法连接皮肤站，请检查网络连接。");
+            // Preview only: a skin-site request fails at startup and when launching. --skin-offline
+            // plays a confirmed skin-site outage, --net-offline the user's own network being down.
+            var problem=netOffline?CMUmcl.Network.ConnectionProblem.LocalNetwork:CMUmcl.Network.ConnectionProblem.SkinSiteDown;
+            CMUmcl.Network.ConnectionDiagnosis.Override=async(_,ct)=>{await Task.Delay(800,ct);return problem;};
+            var down=new YggdrasilException("网络错误，无法连接皮肤站，请检查网络连接。"){Failure=YggdrasilFailure.Unreachable};
             _ = window.VerifyRestoredSessionAsync(_=>Task.FromException<AuthSession>(down));
             window._launchOverride=(_,_)=>Task.FromException<LaunchResult>(new LaunchException("无法确认登录状态："+down.Message,down));
         }

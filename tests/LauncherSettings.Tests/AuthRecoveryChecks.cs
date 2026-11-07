@@ -131,23 +131,42 @@ internal static partial class Program
         slow.SetResult(refreshed); await check;
         Check(Session() == refreshed && State() == "已登录" && prompts == 0, "startup: background check adopts a refreshed session silently");
 
-        // Skin site unreachable: keep the session, no login prompt.
-        field.SetValue(window, old); store.SaveSession(old);
-        await window.VerifyRestoredSessionAsync(_ => Task.FromException<AuthSession>(new YggdrasilException("网络错误，无法连接皮肤站，请检查网络连接。")));
+        // Skin site confirmed down (the internet works): keep the session, show the screenshot.
         var notice = Get<System.Windows.Controls.Border>(window, "AccountNotice");
-        window.UpdateLayout();
         var noticeText = Get<System.Windows.Controls.TextBlock>(window, "AccountNoticeText");
-        Check(notice.IsVisible && noticeText.Text == "皮肤站现在已经坚不可摧" && noticeText.ActualHeight > 0
-            && noticeText.ActualWidth <= ((System.Windows.FrameworkElement)noticeText.Parent).ActualWidth + 0.5 && State() == "已登录",
-            "startup: the unreachable notice gets its own full-width row instead of a truncated state line");
-        Check(Session() == old && !overlay.IsVisible && prompts == 0 && store.LoadSession()?.AccessToken == old.AccessToken,
-            "startup: unreachable skin site keeps the login and never asks for credentials");
-        var hover = notice.ToolTip as System.Windows.Controls.Panel;
-        Check(hover?.Children.OfType<System.Windows.Controls.Image>().SingleOrDefault()?.Source is System.Windows.Media.Imaging.BitmapSource { PixelWidth: 780 }
-            && hover.Children.OfType<System.Windows.Controls.TextBlock>().Any(t => t.Text.Contains("无法连接皮肤站")),
-            "startup: hovering the account shows the screenshot and the actual reason");
+        System.Windows.Controls.Panel? Hover() => notice.ToolTip as System.Windows.Controls.Panel;
+        bool HasPicture() => Hover()?.Children.OfType<System.Windows.Controls.Image>().Any() == true;
+        var diagnosed = new List<Exception>();
+        Task<AuthSession> Unreachable(AuthSession _) => Task.FromException<AuthSession>(new YggdrasilException("网络错误，无法连接皮肤站，请检查网络连接。") { Failure = YggdrasilFailure.Unreachable });
+        try
+        {
+            CMUmcl.Network.ConnectionDiagnosis.Override = (ex, _) => { diagnosed.Add(ex); return Task.FromResult(CMUmcl.Network.ConnectionProblem.SkinSiteDown); };
+            field.SetValue(window, old); store.SaveSession(old);
+            await window.VerifyRestoredSessionAsync(Unreachable);
+            window.UpdateLayout();
+            Check(notice.IsVisible && noticeText.Text == "皮肤站现在已经坚不可摧" && noticeText.ActualHeight > 0
+                && noticeText.ActualWidth <= ((System.Windows.FrameworkElement)noticeText.Parent).ActualWidth + 0.5 && State() == "已登录",
+                "startup: the skin-site notice gets its own full-width row instead of a truncated state line");
+            Check(diagnosed.Count == 1 && Session() == old && !overlay.IsVisible && prompts == 0 && store.LoadSession()?.AccessToken == old.AccessToken,
+                "startup: a connection failure is diagnosed, keeps the login and never asks for credentials");
+            Check(Hover()?.Children.OfType<System.Windows.Controls.Image>().SingleOrDefault()?.Source is System.Windows.Media.Imaging.BitmapSource { PixelWidth: 780 }
+                && Hover()!.Children.OfType<System.Windows.Controls.TextBlock>().Any(t => t.Text == "无法连接皮肤站，请检查皮肤站状态。") && !Hover()!.Children.OfType<System.Windows.Controls.TextBlock>().Any(t => t.Text.Contains("请检查网络连接")),
+                "startup: a confirmed skin-site outage shows the screenshot and why it is the skin site");
+
+            // The user's own network is down: plain explanation, no screenshot.
+            CMUmcl.Network.ConnectionDiagnosis.Override = (_, _) => Task.FromResult(CMUmcl.Network.ConnectionProblem.LocalNetwork);
+            await window.VerifyRestoredSessionAsync(Unreachable);
+            Check(noticeText.Text == "网络连接不可用" && !HasPicture() && Hover()!.Children.OfType<System.Windows.Controls.TextBlock>().Any(t => t.Text.Contains("检查网络连接或代理设置")),
+                "startup: the user's own network problem is not blamed on the skin site");
+
+            // Could not pin it on either side (the skin site answered the second time).
+            CMUmcl.Network.ConnectionDiagnosis.Override = (_, _) => Task.FromResult(CMUmcl.Network.ConnectionProblem.Unknown);
+            await window.VerifyRestoredSessionAsync(Unreachable);
+            Check(noticeText.Text == "暂时无法连接皮肤站" && !HasPicture(), "startup: an unconfirmed failure gets a neutral notice without the screenshot");
+        }
+        finally { CMUmcl.Network.ConnectionDiagnosis.Override = null; }
         await window.VerifyRestoredSessionAsync(s => Task.FromResult(s));
-        Check(State() == "已登录" && notice.ToolTip == null && !notice.IsVisible, "startup: a later successful check removes the screenshot");
+        Check(State() == "已登录" && notice.ToolTip == null && !notice.IsVisible, "startup: a later successful check removes the notice");
 
         // Login no longer valid, user postpones: saved session is cleared, UI says so.
         field.SetValue(window, old); store.SaveSession(old);

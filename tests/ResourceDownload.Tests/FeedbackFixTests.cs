@@ -1,6 +1,8 @@
 using System.Net;
 using CMUmcl.Community;
+using CMUmcl.Auth;
 using CMUmcl.Content;
+using CMUmcl.Network;
 
 // User feedback: slow community page, instances that cannot be deleted.
 internal static class FeedbackFixTests
@@ -14,6 +16,7 @@ internal static class FeedbackFixTests
             await ProgressiveSearchChecks(check);
             await IconCacheChecks(root, check);
             RemovalChecks(root, check);
+            await DiagnosisChecks(check);
         }
         finally { try { Directory.Delete(root, true); } catch { /* best effort */ } }
     }
@@ -74,6 +77,64 @@ internal static class FeedbackFixTests
             check(refused && Directory.Exists(outside) && installed.ListRecords().ContainsKey("local:outside"), "delete: folders outside the instances directory are never touched");
         }
         finally { InstanceRemoval.RecycleOverride = null; LauncherPaths.RootOverride = oldRoot; }
+    }
+
+    // "Skin site down" must only be said when the rest of the internet is known to work.
+    private static async Task DiagnosisChecks(Action<bool, string> check)
+    {
+        var requested = new List<string>();
+        bool internet = true; Func<HttpResponseMessage?> skinSite = () => null;
+        HttpResponseMessage Route(HttpRequestMessage request)
+        {
+            requested.Add(request.RequestUri!.Host);
+            if (request.RequestUri.Host == new Uri(YggdrasilClient.ApiRoot).Host)
+                return skinSite() ?? throw new HttpRequestException("skin site refused");
+            return internet ? new HttpResponseMessage(HttpStatusCode.OK) : throw new HttpRequestException("no route");
+        }
+        var unreachable = new YggdrasilException("网络错误") { Failure = YggdrasilFailure.Unreachable };
+        var serverError = new YggdrasilException("皮肤站暂时不可用") { Failure = YggdrasilFailure.ServerError };
+        bool adapter = true;
+        ConnectionDiagnosis.HandlerOverride = new Reply(Route);
+        ConnectionDiagnosis.NetworkAvailableOverride = () => adapter;
+        try
+        {
+            check(await ConnectionDiagnosis.DiagnoseAsync(new YggdrasilException("密码错误")) == ConnectionProblem.Unknown && requested.Count == 0,
+                "diagnosis: a regular skin-site error is not treated as a connection problem");
+
+            adapter = false;
+            check(await ConnectionDiagnosis.DiagnoseAsync(unreachable) == ConnectionProblem.LocalNetwork && requested.Count == 0,
+                "diagnosis: no connected network adapter is the user's network, without probing");
+            adapter = true;
+
+            internet = false; requested.Clear();
+            check(await ConnectionDiagnosis.DiagnoseAsync(unreachable) == ConnectionProblem.LocalNetwork
+                && !requested.Contains(new Uri(YggdrasilClient.ApiRoot).Host) && requested.Count == ConnectionDiagnosis.ReferenceUrls.Length,
+                "diagnosis: other sites unreachable too means the user's network, not the skin site");
+            check(await ConnectionDiagnosis.DiagnoseAsync(serverError) == ConnectionProblem.LocalNetwork,
+                "diagnosis: a 5xx seen while nothing else answers (e.g. a broken proxy) is not blamed on the skin site");
+
+            internet = true; skinSite = () => null;
+            check(await ConnectionDiagnosis.DiagnoseAsync(unreachable) == ConnectionProblem.SkinSiteDown,
+                "diagnosis: internet works and the skin site still refuses connections, so the skin site is down");
+            skinSite = () => new HttpResponseMessage(HttpStatusCode.BadGateway);
+            check(await ConnectionDiagnosis.DiagnoseAsync(serverError) == ConnectionProblem.SkinSiteDown,
+                "diagnosis: internet works and the skin site answers 502, so the skin site is down");
+            skinSite = () => new HttpResponseMessage(HttpStatusCode.OK);
+            check(await ConnectionDiagnosis.DiagnoseAsync(unreachable) == ConnectionProblem.Unknown,
+                "diagnosis: the skin site answering on the re-check is reported as a blip, not an outage");
+        }
+        finally { ConnectionDiagnosis.HandlerOverride = null; ConnectionDiagnosis.NetworkAvailableOverride = null; }
+
+        async Task<YggdrasilFailure?> FailureFor(Func<HttpRequestMessage, HttpResponseMessage> reply)
+        {
+            using var client = new YggdrasilClient(new Reply(reply));
+            try { await client.ValidateAsync("token", "client"); return null; }
+            catch (YggdrasilException ex) { return ex.Failure; }
+        }
+        check(await FailureFor(_ => throw new HttpRequestException("refused")) == YggdrasilFailure.Unreachable
+            && await FailureFor(_ => new HttpResponseMessage(HttpStatusCode.BadGateway)) == YggdrasilFailure.ServerError
+            && await FailureFor(_ => new HttpResponseMessage(HttpStatusCode.Forbidden)) == null,
+            "diagnosis: the skin-site client tags refused connections and 5xx answers differently from a rejected token");
     }
 
     private sealed class FakeSource(ResourceSourceId id, Task gate, string prefix) : IResourceSource
